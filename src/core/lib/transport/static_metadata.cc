@@ -125,337 +125,191 @@ static uint8_t g_bytes[] = {
     112};
 
 grpc_slice_refcount grpc_core::StaticSliceRefcount::kStaticSubRefcount;
-grpc_core::StaticSliceRefcount
-    grpc_static_metadata_refcounts[GRPC_STATIC_MDSTR_COUNT] = {
-        grpc_core::StaticSliceRefcount(0),
-        grpc_core::StaticSliceRefcount(1),
-        grpc_core::StaticSliceRefcount(2),
-        grpc_core::StaticSliceRefcount(3),
-        grpc_core::StaticSliceRefcount(4),
-        grpc_core::StaticSliceRefcount(5),
-        grpc_core::StaticSliceRefcount(6),
-        grpc_core::StaticSliceRefcount(7),
-        grpc_core::StaticSliceRefcount(8),
-        grpc_core::StaticSliceRefcount(9),
-        grpc_core::StaticSliceRefcount(10),
-        grpc_core::StaticSliceRefcount(11),
-        grpc_core::StaticSliceRefcount(12),
-        grpc_core::StaticSliceRefcount(13),
-        grpc_core::StaticSliceRefcount(14),
-        grpc_core::StaticSliceRefcount(15),
-        grpc_core::StaticSliceRefcount(16),
-        grpc_core::StaticSliceRefcount(17),
-        grpc_core::StaticSliceRefcount(18),
-        grpc_core::StaticSliceRefcount(19),
-        grpc_core::StaticSliceRefcount(20),
-        grpc_core::StaticSliceRefcount(21),
-        grpc_core::StaticSliceRefcount(22),
-        grpc_core::StaticSliceRefcount(23),
-        grpc_core::StaticSliceRefcount(24),
-        grpc_core::StaticSliceRefcount(25),
-        grpc_core::StaticSliceRefcount(26),
-        grpc_core::StaticSliceRefcount(27),
-        grpc_core::StaticSliceRefcount(28),
-        grpc_core::StaticSliceRefcount(29),
-        grpc_core::StaticSliceRefcount(30),
-        grpc_core::StaticSliceRefcount(31),
-        grpc_core::StaticSliceRefcount(32),
-        grpc_core::StaticSliceRefcount(33),
-        grpc_core::StaticSliceRefcount(34),
-        grpc_core::StaticSliceRefcount(35),
-        grpc_core::StaticSliceRefcount(36),
-        grpc_core::StaticSliceRefcount(37),
-        grpc_core::StaticSliceRefcount(38),
-        grpc_core::StaticSliceRefcount(39),
-        grpc_core::StaticSliceRefcount(40),
-        grpc_core::StaticSliceRefcount(41),
-        grpc_core::StaticSliceRefcount(42),
-        grpc_core::StaticSliceRefcount(43),
-        grpc_core::StaticSliceRefcount(44),
-        grpc_core::StaticSliceRefcount(45),
-        grpc_core::StaticSliceRefcount(46),
-        grpc_core::StaticSliceRefcount(47),
-        grpc_core::StaticSliceRefcount(48),
-        grpc_core::StaticSliceRefcount(49),
-        grpc_core::StaticSliceRefcount(50),
-        grpc_core::StaticSliceRefcount(51),
-        grpc_core::StaticSliceRefcount(52),
-        grpc_core::StaticSliceRefcount(53),
-        grpc_core::StaticSliceRefcount(54),
-        grpc_core::StaticSliceRefcount(55),
-        grpc_core::StaticSliceRefcount(56),
-        grpc_core::StaticSliceRefcount(57),
-        grpc_core::StaticSliceRefcount(58),
-        grpc_core::StaticSliceRefcount(59),
-        grpc_core::StaticSliceRefcount(60),
-        grpc_core::StaticSliceRefcount(61),
-        grpc_core::StaticSliceRefcount(62),
-        grpc_core::StaticSliceRefcount(63),
-        grpc_core::StaticSliceRefcount(64),
-        grpc_core::StaticSliceRefcount(65),
-        grpc_core::StaticSliceRefcount(66),
-        grpc_core::StaticSliceRefcount(67),
-        grpc_core::StaticSliceRefcount(68),
-        grpc_core::StaticSliceRefcount(69),
-        grpc_core::StaticSliceRefcount(70),
-        grpc_core::StaticSliceRefcount(71),
-        grpc_core::StaticSliceRefcount(72),
-        grpc_core::StaticSliceRefcount(73),
-        grpc_core::StaticSliceRefcount(74),
-        grpc_core::StaticSliceRefcount(75),
-        grpc_core::StaticSliceRefcount(76),
-        grpc_core::StaticSliceRefcount(77),
-        grpc_core::StaticSliceRefcount(78),
-        grpc_core::StaticSliceRefcount(79),
-        grpc_core::StaticSliceRefcount(80),
-        grpc_core::StaticSliceRefcount(81),
-        grpc_core::StaticSliceRefcount(82),
-        grpc_core::StaticSliceRefcount(83),
-        grpc_core::StaticSliceRefcount(84),
-        grpc_core::StaticSliceRefcount(85),
-        grpc_core::StaticSliceRefcount(86),
-        grpc_core::StaticSliceRefcount(87),
-        grpc_core::StaticSliceRefcount(88),
-        grpc_core::StaticSliceRefcount(89),
-        grpc_core::StaticSliceRefcount(90),
-        grpc_core::StaticSliceRefcount(91),
-        grpc_core::StaticSliceRefcount(92),
-        grpc_core::StaticSliceRefcount(93),
-        grpc_core::StaticSliceRefcount(94),
-        grpc_core::StaticSliceRefcount(95),
-        grpc_core::StaticSliceRefcount(96),
-        grpc_core::StaticSliceRefcount(97),
-        grpc_core::StaticSliceRefcount(98),
-        grpc_core::StaticSliceRefcount(99),
-        grpc_core::StaticSliceRefcount(100),
-        grpc_core::StaticSliceRefcount(101),
-        grpc_core::StaticSliceRefcount(102),
-        grpc_core::StaticSliceRefcount(103),
-        grpc_core::StaticSliceRefcount(104),
-        grpc_core::StaticSliceRefcount(105),
-        grpc_core::StaticSliceRefcount(106),
-        grpc_core::StaticSliceRefcount(107),
+
+struct StaticMetadataSliceCtx {
+  grpc_core::StaticSliceRefcount refcounts[GRPC_STATIC_MDSTR_COUNT] = {
+
+      grpc_core::StaticSliceRefcount(0),   grpc_core::StaticSliceRefcount(1),
+      grpc_core::StaticSliceRefcount(2),   grpc_core::StaticSliceRefcount(3),
+      grpc_core::StaticSliceRefcount(4),   grpc_core::StaticSliceRefcount(5),
+      grpc_core::StaticSliceRefcount(6),   grpc_core::StaticSliceRefcount(7),
+      grpc_core::StaticSliceRefcount(8),   grpc_core::StaticSliceRefcount(9),
+      grpc_core::StaticSliceRefcount(10),  grpc_core::StaticSliceRefcount(11),
+      grpc_core::StaticSliceRefcount(12),  grpc_core::StaticSliceRefcount(13),
+      grpc_core::StaticSliceRefcount(14),  grpc_core::StaticSliceRefcount(15),
+      grpc_core::StaticSliceRefcount(16),  grpc_core::StaticSliceRefcount(17),
+      grpc_core::StaticSliceRefcount(18),  grpc_core::StaticSliceRefcount(19),
+      grpc_core::StaticSliceRefcount(20),  grpc_core::StaticSliceRefcount(21),
+      grpc_core::StaticSliceRefcount(22),  grpc_core::StaticSliceRefcount(23),
+      grpc_core::StaticSliceRefcount(24),  grpc_core::StaticSliceRefcount(25),
+      grpc_core::StaticSliceRefcount(26),  grpc_core::StaticSliceRefcount(27),
+      grpc_core::StaticSliceRefcount(28),  grpc_core::StaticSliceRefcount(29),
+      grpc_core::StaticSliceRefcount(30),  grpc_core::StaticSliceRefcount(31),
+      grpc_core::StaticSliceRefcount(32),  grpc_core::StaticSliceRefcount(33),
+      grpc_core::StaticSliceRefcount(34),  grpc_core::StaticSliceRefcount(35),
+      grpc_core::StaticSliceRefcount(36),  grpc_core::StaticSliceRefcount(37),
+      grpc_core::StaticSliceRefcount(38),  grpc_core::StaticSliceRefcount(39),
+      grpc_core::StaticSliceRefcount(40),  grpc_core::StaticSliceRefcount(41),
+      grpc_core::StaticSliceRefcount(42),  grpc_core::StaticSliceRefcount(43),
+      grpc_core::StaticSliceRefcount(44),  grpc_core::StaticSliceRefcount(45),
+      grpc_core::StaticSliceRefcount(46),  grpc_core::StaticSliceRefcount(47),
+      grpc_core::StaticSliceRefcount(48),  grpc_core::StaticSliceRefcount(49),
+      grpc_core::StaticSliceRefcount(50),  grpc_core::StaticSliceRefcount(51),
+      grpc_core::StaticSliceRefcount(52),  grpc_core::StaticSliceRefcount(53),
+      grpc_core::StaticSliceRefcount(54),  grpc_core::StaticSliceRefcount(55),
+      grpc_core::StaticSliceRefcount(56),  grpc_core::StaticSliceRefcount(57),
+      grpc_core::StaticSliceRefcount(58),  grpc_core::StaticSliceRefcount(59),
+      grpc_core::StaticSliceRefcount(60),  grpc_core::StaticSliceRefcount(61),
+      grpc_core::StaticSliceRefcount(62),  grpc_core::StaticSliceRefcount(63),
+      grpc_core::StaticSliceRefcount(64),  grpc_core::StaticSliceRefcount(65),
+      grpc_core::StaticSliceRefcount(66),  grpc_core::StaticSliceRefcount(67),
+      grpc_core::StaticSliceRefcount(68),  grpc_core::StaticSliceRefcount(69),
+      grpc_core::StaticSliceRefcount(70),  grpc_core::StaticSliceRefcount(71),
+      grpc_core::StaticSliceRefcount(72),  grpc_core::StaticSliceRefcount(73),
+      grpc_core::StaticSliceRefcount(74),  grpc_core::StaticSliceRefcount(75),
+      grpc_core::StaticSliceRefcount(76),  grpc_core::StaticSliceRefcount(77),
+      grpc_core::StaticSliceRefcount(78),  grpc_core::StaticSliceRefcount(79),
+      grpc_core::StaticSliceRefcount(80),  grpc_core::StaticSliceRefcount(81),
+      grpc_core::StaticSliceRefcount(82),  grpc_core::StaticSliceRefcount(83),
+      grpc_core::StaticSliceRefcount(84),  grpc_core::StaticSliceRefcount(85),
+      grpc_core::StaticSliceRefcount(86),  grpc_core::StaticSliceRefcount(87),
+      grpc_core::StaticSliceRefcount(88),  grpc_core::StaticSliceRefcount(89),
+      grpc_core::StaticSliceRefcount(90),  grpc_core::StaticSliceRefcount(91),
+      grpc_core::StaticSliceRefcount(92),  grpc_core::StaticSliceRefcount(93),
+      grpc_core::StaticSliceRefcount(94),  grpc_core::StaticSliceRefcount(95),
+      grpc_core::StaticSliceRefcount(96),  grpc_core::StaticSliceRefcount(97),
+      grpc_core::StaticSliceRefcount(98),  grpc_core::StaticSliceRefcount(99),
+      grpc_core::StaticSliceRefcount(100), grpc_core::StaticSliceRefcount(101),
+      grpc_core::StaticSliceRefcount(102), grpc_core::StaticSliceRefcount(103),
+      grpc_core::StaticSliceRefcount(104), grpc_core::StaticSliceRefcount(105),
+      grpc_core::StaticSliceRefcount(106), grpc_core::StaticSliceRefcount(107),
+  };
+
+  const grpc_core::StaticMetadataSlice slices[GRPC_STATIC_MDSTR_COUNT] = {
+
+      grpc_core::StaticMetadataSlice(&refcounts[0].base, 5, g_bytes + 0),
+      grpc_core::StaticMetadataSlice(&refcounts[1].base, 7, g_bytes + 5),
+      grpc_core::StaticMetadataSlice(&refcounts[2].base, 7, g_bytes + 12),
+      grpc_core::StaticMetadataSlice(&refcounts[3].base, 10, g_bytes + 19),
+      grpc_core::StaticMetadataSlice(&refcounts[4].base, 7, g_bytes + 29),
+      grpc_core::StaticMetadataSlice(&refcounts[5].base, 2, g_bytes + 36),
+      grpc_core::StaticMetadataSlice(&refcounts[6].base, 12, g_bytes + 38),
+      grpc_core::StaticMetadataSlice(&refcounts[7].base, 11, g_bytes + 50),
+      grpc_core::StaticMetadataSlice(&refcounts[8].base, 16, g_bytes + 61),
+      grpc_core::StaticMetadataSlice(&refcounts[9].base, 13, g_bytes + 77),
+      grpc_core::StaticMetadataSlice(&refcounts[10].base, 20, g_bytes + 90),
+      grpc_core::StaticMetadataSlice(&refcounts[11].base, 21, g_bytes + 110),
+      grpc_core::StaticMetadataSlice(&refcounts[12].base, 13, g_bytes + 131),
+      grpc_core::StaticMetadataSlice(&refcounts[13].base, 14, g_bytes + 144),
+      grpc_core::StaticMetadataSlice(&refcounts[14].base, 12, g_bytes + 158),
+      grpc_core::StaticMetadataSlice(&refcounts[15].base, 16, g_bytes + 170),
+      grpc_core::StaticMetadataSlice(&refcounts[16].base, 15, g_bytes + 186),
+      grpc_core::StaticMetadataSlice(&refcounts[17].base, 30, g_bytes + 201),
+      grpc_core::StaticMetadataSlice(&refcounts[18].base, 37, g_bytes + 231),
+      grpc_core::StaticMetadataSlice(&refcounts[19].base, 10, g_bytes + 268),
+      grpc_core::StaticMetadataSlice(&refcounts[20].base, 4, g_bytes + 278),
+      grpc_core::StaticMetadataSlice(&refcounts[21].base, 26, g_bytes + 282),
+      grpc_core::StaticMetadataSlice(&refcounts[22].base, 22, g_bytes + 308),
+      grpc_core::StaticMetadataSlice(&refcounts[23].base, 12, g_bytes + 330),
+      grpc_core::StaticMetadataSlice(&refcounts[24].base, 1, g_bytes + 342),
+      grpc_core::StaticMetadataSlice(&refcounts[25].base, 1, g_bytes + 343),
+      grpc_core::StaticMetadataSlice(&refcounts[26].base, 1, g_bytes + 344),
+      grpc_core::StaticMetadataSlice(&refcounts[27].base, 1, g_bytes + 345),
+      grpc_core::StaticMetadataSlice(&refcounts[28].base, 0, g_bytes + 346),
+      grpc_core::StaticMetadataSlice(&refcounts[29].base, 19, g_bytes + 346),
+      grpc_core::StaticMetadataSlice(&refcounts[30].base, 12, g_bytes + 365),
+      grpc_core::StaticMetadataSlice(&refcounts[31].base, 30, g_bytes + 377),
+      grpc_core::StaticMetadataSlice(&refcounts[32].base, 31, g_bytes + 407),
+      grpc_core::StaticMetadataSlice(&refcounts[33].base, 36, g_bytes + 438),
+      grpc_core::StaticMetadataSlice(&refcounts[34].base, 65, g_bytes + 474),
+      grpc_core::StaticMetadataSlice(&refcounts[35].base, 54, g_bytes + 539),
+      grpc_core::StaticMetadataSlice(&refcounts[36].base, 28, g_bytes + 593),
+      grpc_core::StaticMetadataSlice(&refcounts[37].base, 80, g_bytes + 621),
+      grpc_core::StaticMetadataSlice(&refcounts[38].base, 7, g_bytes + 701),
+      grpc_core::StaticMetadataSlice(&refcounts[39].base, 4, g_bytes + 708),
+      grpc_core::StaticMetadataSlice(&refcounts[40].base, 11, g_bytes + 712),
+      grpc_core::StaticMetadataSlice(&refcounts[41].base, 3, g_bytes + 723),
+      grpc_core::StaticMetadataSlice(&refcounts[42].base, 4, g_bytes + 726),
+      grpc_core::StaticMetadataSlice(&refcounts[43].base, 1, g_bytes + 730),
+      grpc_core::StaticMetadataSlice(&refcounts[44].base, 11, g_bytes + 731),
+      grpc_core::StaticMetadataSlice(&refcounts[45].base, 4, g_bytes + 742),
+      grpc_core::StaticMetadataSlice(&refcounts[46].base, 5, g_bytes + 746),
+      grpc_core::StaticMetadataSlice(&refcounts[47].base, 3, g_bytes + 751),
+      grpc_core::StaticMetadataSlice(&refcounts[48].base, 3, g_bytes + 754),
+      grpc_core::StaticMetadataSlice(&refcounts[49].base, 3, g_bytes + 757),
+      grpc_core::StaticMetadataSlice(&refcounts[50].base, 3, g_bytes + 760),
+      grpc_core::StaticMetadataSlice(&refcounts[51].base, 3, g_bytes + 763),
+      grpc_core::StaticMetadataSlice(&refcounts[52].base, 3, g_bytes + 766),
+      grpc_core::StaticMetadataSlice(&refcounts[53].base, 3, g_bytes + 769),
+      grpc_core::StaticMetadataSlice(&refcounts[54].base, 14, g_bytes + 772),
+      grpc_core::StaticMetadataSlice(&refcounts[55].base, 13, g_bytes + 786),
+      grpc_core::StaticMetadataSlice(&refcounts[56].base, 15, g_bytes + 799),
+      grpc_core::StaticMetadataSlice(&refcounts[57].base, 13, g_bytes + 814),
+      grpc_core::StaticMetadataSlice(&refcounts[58].base, 6, g_bytes + 827),
+      grpc_core::StaticMetadataSlice(&refcounts[59].base, 27, g_bytes + 833),
+      grpc_core::StaticMetadataSlice(&refcounts[60].base, 3, g_bytes + 860),
+      grpc_core::StaticMetadataSlice(&refcounts[61].base, 5, g_bytes + 863),
+      grpc_core::StaticMetadataSlice(&refcounts[62].base, 13, g_bytes + 868),
+      grpc_core::StaticMetadataSlice(&refcounts[63].base, 13, g_bytes + 881),
+      grpc_core::StaticMetadataSlice(&refcounts[64].base, 19, g_bytes + 894),
+      grpc_core::StaticMetadataSlice(&refcounts[65].base, 16, g_bytes + 913),
+      grpc_core::StaticMetadataSlice(&refcounts[66].base, 14, g_bytes + 929),
+      grpc_core::StaticMetadataSlice(&refcounts[67].base, 16, g_bytes + 943),
+      grpc_core::StaticMetadataSlice(&refcounts[68].base, 13, g_bytes + 959),
+      grpc_core::StaticMetadataSlice(&refcounts[69].base, 6, g_bytes + 972),
+      grpc_core::StaticMetadataSlice(&refcounts[70].base, 4, g_bytes + 978),
+      grpc_core::StaticMetadataSlice(&refcounts[71].base, 4, g_bytes + 982),
+      grpc_core::StaticMetadataSlice(&refcounts[72].base, 6, g_bytes + 986),
+      grpc_core::StaticMetadataSlice(&refcounts[73].base, 7, g_bytes + 992),
+      grpc_core::StaticMetadataSlice(&refcounts[74].base, 4, g_bytes + 999),
+      grpc_core::StaticMetadataSlice(&refcounts[75].base, 8, g_bytes + 1003),
+      grpc_core::StaticMetadataSlice(&refcounts[76].base, 17, g_bytes + 1011),
+      grpc_core::StaticMetadataSlice(&refcounts[77].base, 13, g_bytes + 1028),
+      grpc_core::StaticMetadataSlice(&refcounts[78].base, 8, g_bytes + 1041),
+      grpc_core::StaticMetadataSlice(&refcounts[79].base, 19, g_bytes + 1049),
+      grpc_core::StaticMetadataSlice(&refcounts[80].base, 13, g_bytes + 1068),
+      grpc_core::StaticMetadataSlice(&refcounts[81].base, 4, g_bytes + 1081),
+      grpc_core::StaticMetadataSlice(&refcounts[82].base, 8, g_bytes + 1085),
+      grpc_core::StaticMetadataSlice(&refcounts[83].base, 12, g_bytes + 1093),
+      grpc_core::StaticMetadataSlice(&refcounts[84].base, 18, g_bytes + 1105),
+      grpc_core::StaticMetadataSlice(&refcounts[85].base, 19, g_bytes + 1123),
+      grpc_core::StaticMetadataSlice(&refcounts[86].base, 5, g_bytes + 1142),
+      grpc_core::StaticMetadataSlice(&refcounts[87].base, 7, g_bytes + 1147),
+      grpc_core::StaticMetadataSlice(&refcounts[88].base, 7, g_bytes + 1154),
+      grpc_core::StaticMetadataSlice(&refcounts[89].base, 11, g_bytes + 1161),
+      grpc_core::StaticMetadataSlice(&refcounts[90].base, 6, g_bytes + 1172),
+      grpc_core::StaticMetadataSlice(&refcounts[91].base, 10, g_bytes + 1178),
+      grpc_core::StaticMetadataSlice(&refcounts[92].base, 25, g_bytes + 1188),
+      grpc_core::StaticMetadataSlice(&refcounts[93].base, 17, g_bytes + 1213),
+      grpc_core::StaticMetadataSlice(&refcounts[94].base, 4, g_bytes + 1230),
+      grpc_core::StaticMetadataSlice(&refcounts[95].base, 3, g_bytes + 1234),
+      grpc_core::StaticMetadataSlice(&refcounts[96].base, 16, g_bytes + 1237),
+      grpc_core::StaticMetadataSlice(&refcounts[97].base, 1, g_bytes + 1253),
+      grpc_core::StaticMetadataSlice(&refcounts[98].base, 8, g_bytes + 1254),
+      grpc_core::StaticMetadataSlice(&refcounts[99].base, 8, g_bytes + 1262),
+      grpc_core::StaticMetadataSlice(&refcounts[100].base, 16, g_bytes + 1270),
+      grpc_core::StaticMetadataSlice(&refcounts[101].base, 4, g_bytes + 1286),
+      grpc_core::StaticMetadataSlice(&refcounts[102].base, 3, g_bytes + 1290),
+      grpc_core::StaticMetadataSlice(&refcounts[103].base, 11, g_bytes + 1293),
+      grpc_core::StaticMetadataSlice(&refcounts[104].base, 16, g_bytes + 1304),
+      grpc_core::StaticMetadataSlice(&refcounts[105].base, 13, g_bytes + 1320),
+      grpc_core::StaticMetadataSlice(&refcounts[106].base, 12, g_bytes + 1333),
+      grpc_core::StaticMetadataSlice(&refcounts[107].base, 21, g_bytes + 1345),
+  };
 };
 
-const grpc_core::StaticMetadataSlice
-    grpc_static_slice_table[GRPC_STATIC_MDSTR_COUNT] = {
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[0].base,
-                                       5, g_bytes + 0),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[1].base,
-                                       7, g_bytes + 5),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[2].base,
-                                       7, g_bytes + 12),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[3].base,
-                                       10, g_bytes + 19),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[4].base,
-                                       7, g_bytes + 29),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[5].base,
-                                       2, g_bytes + 36),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[6].base,
-                                       12, g_bytes + 38),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[7].base,
-                                       11, g_bytes + 50),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[8].base,
-                                       16, g_bytes + 61),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[9].base,
-                                       13, g_bytes + 77),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[10].base,
-                                       20, g_bytes + 90),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[11].base,
-                                       21, g_bytes + 110),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[12].base,
-                                       13, g_bytes + 131),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[13].base,
-                                       14, g_bytes + 144),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[14].base,
-                                       12, g_bytes + 158),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[15].base,
-                                       16, g_bytes + 170),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[16].base,
-                                       15, g_bytes + 186),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[17].base,
-                                       30, g_bytes + 201),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[18].base,
-                                       37, g_bytes + 231),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[19].base,
-                                       10, g_bytes + 268),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[20].base,
-                                       4, g_bytes + 278),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[21].base,
-                                       26, g_bytes + 282),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[22].base,
-                                       22, g_bytes + 308),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[23].base,
-                                       12, g_bytes + 330),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[24].base,
-                                       1, g_bytes + 342),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[25].base,
-                                       1, g_bytes + 343),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[26].base,
-                                       1, g_bytes + 344),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[27].base,
-                                       1, g_bytes + 345),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[29].base,
-                                       19, g_bytes + 346),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[30].base,
-                                       12, g_bytes + 365),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[31].base,
-                                       30, g_bytes + 377),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[32].base,
-                                       31, g_bytes + 407),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[33].base,
-                                       36, g_bytes + 438),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[34].base,
-                                       65, g_bytes + 474),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[35].base,
-                                       54, g_bytes + 539),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[36].base,
-                                       28, g_bytes + 593),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[37].base,
-                                       80, g_bytes + 621),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[38].base,
-                                       7, g_bytes + 701),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[39].base,
-                                       4, g_bytes + 708),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[40].base,
-                                       11, g_bytes + 712),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[41].base,
-                                       3, g_bytes + 723),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[42].base,
-                                       4, g_bytes + 726),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[43].base,
-                                       1, g_bytes + 730),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[44].base,
-                                       11, g_bytes + 731),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[45].base,
-                                       4, g_bytes + 742),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[46].base,
-                                       5, g_bytes + 746),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[47].base,
-                                       3, g_bytes + 751),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[48].base,
-                                       3, g_bytes + 754),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[49].base,
-                                       3, g_bytes + 757),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[50].base,
-                                       3, g_bytes + 760),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[51].base,
-                                       3, g_bytes + 763),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[52].base,
-                                       3, g_bytes + 766),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[53].base,
-                                       3, g_bytes + 769),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[54].base,
-                                       14, g_bytes + 772),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[55].base,
-                                       13, g_bytes + 786),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[56].base,
-                                       15, g_bytes + 799),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[57].base,
-                                       13, g_bytes + 814),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[58].base,
-                                       6, g_bytes + 827),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[59].base,
-                                       27, g_bytes + 833),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[60].base,
-                                       3, g_bytes + 860),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[61].base,
-                                       5, g_bytes + 863),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[62].base,
-                                       13, g_bytes + 868),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[63].base,
-                                       13, g_bytes + 881),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[64].base,
-                                       19, g_bytes + 894),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[65].base,
-                                       16, g_bytes + 913),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[66].base,
-                                       14, g_bytes + 929),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[67].base,
-                                       16, g_bytes + 943),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[68].base,
-                                       13, g_bytes + 959),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[69].base,
-                                       6, g_bytes + 972),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[70].base,
-                                       4, g_bytes + 978),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[71].base,
-                                       4, g_bytes + 982),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[72].base,
-                                       6, g_bytes + 986),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[73].base,
-                                       7, g_bytes + 992),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[74].base,
-                                       4, g_bytes + 999),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[75].base,
-                                       8, g_bytes + 1003),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[76].base,
-                                       17, g_bytes + 1011),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[77].base,
-                                       13, g_bytes + 1028),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[78].base,
-                                       8, g_bytes + 1041),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[79].base,
-                                       19, g_bytes + 1049),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[80].base,
-                                       13, g_bytes + 1068),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[81].base,
-                                       4, g_bytes + 1081),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[82].base,
-                                       8, g_bytes + 1085),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[83].base,
-                                       12, g_bytes + 1093),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[84].base,
-                                       18, g_bytes + 1105),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[85].base,
-                                       19, g_bytes + 1123),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[86].base,
-                                       5, g_bytes + 1142),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[87].base,
-                                       7, g_bytes + 1147),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[88].base,
-                                       7, g_bytes + 1154),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[89].base,
-                                       11, g_bytes + 1161),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[90].base,
-                                       6, g_bytes + 1172),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[91].base,
-                                       10, g_bytes + 1178),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[92].base,
-                                       25, g_bytes + 1188),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[93].base,
-                                       17, g_bytes + 1213),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[94].base,
-                                       4, g_bytes + 1230),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[95].base,
-                                       3, g_bytes + 1234),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[96].base,
-                                       16, g_bytes + 1237),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[97].base,
-                                       1, g_bytes + 1253),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[98].base,
-                                       8, g_bytes + 1254),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[99].base,
-                                       8, g_bytes + 1262),
-        grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[100].base, 16, g_bytes + 1270),
-        grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[101].base, 4, g_bytes + 1286),
-        grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[102].base, 3, g_bytes + 1290),
-        grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[103].base, 11, g_bytes + 1293),
-        grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[104].base, 16, g_bytes + 1304),
-        grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[105].base, 13, g_bytes + 1320),
-        grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[106].base, 12, g_bytes + 1333),
-        grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[107].base, 21, g_bytes + 1345),
-};
+static StaticMetadataSliceCtx& static_metadata_slice_ctx() {
+  static StaticMetadataSliceCtx* ctx = grpc_core::New<StaticMetadataSliceCtx>();
+  return *ctx;
+}
+
+const grpc_core::StaticMetadataSlice* grpc_static_slice_table() {
+  return static_metadata_slice_ctx().slices;
+}
+
+grpc_core::StaticSliceRefcount* grpc_static_metadata_refcounts() {
+  return static_metadata_slice_ctx().refcounts;
+}
 
 /* Warning: the core static metadata currently operates under the soft
 constraint that the first GRPC_CHTTP2_LAST_STATIC_ENTRY (61) entries must
@@ -953,514 +807,514 @@ grpc_mdelem grpc_static_mdelem_for_static_strings(intptr_t a, intptr_t b) {
 
 grpc_core::StaticMetadata grpc_static_mdelem_table[GRPC_STATIC_MDELEM_COUNT] = {
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[3].base,
-                                       10, g_bytes + 19),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[3].base, 10, g_bytes + 19),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         0),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[1].base,
-                                       7, g_bytes + 5),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[41].base,
-                                       3, g_bytes + 723),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[1].base, 7, g_bytes + 5),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[41].base, 3, g_bytes + 723),
         1),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[1].base,
-                                       7, g_bytes + 5),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[42].base,
-                                       4, g_bytes + 726),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[1].base, 7, g_bytes + 5),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[42].base, 4, g_bytes + 726),
         2),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[0].base,
-                                       5, g_bytes + 0),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[43].base,
-                                       1, g_bytes + 730),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[0].base, 5, g_bytes + 0),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[43].base, 1, g_bytes + 730),
         3),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[0].base,
-                                       5, g_bytes + 0),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[44].base,
-                                       11, g_bytes + 731),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[0].base, 5, g_bytes + 0),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[44].base, 11, g_bytes + 731),
         4),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[4].base,
-                                       7, g_bytes + 29),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[45].base,
-                                       4, g_bytes + 742),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[4].base, 7, g_bytes + 29),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[45].base, 4, g_bytes + 742),
         5),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[4].base,
-                                       7, g_bytes + 29),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[46].base,
-                                       5, g_bytes + 746),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[4].base, 7, g_bytes + 29),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[46].base, 5, g_bytes + 746),
         6),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[2].base,
-                                       7, g_bytes + 12),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[47].base,
-                                       3, g_bytes + 751),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[2].base, 7, g_bytes + 12),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[47].base, 3, g_bytes + 751),
         7),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[2].base,
-                                       7, g_bytes + 12),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[48].base,
-                                       3, g_bytes + 754),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[2].base, 7, g_bytes + 12),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[48].base, 3, g_bytes + 754),
         8),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[2].base,
-                                       7, g_bytes + 12),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[49].base,
-                                       3, g_bytes + 757),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[2].base, 7, g_bytes + 12),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[49].base, 3, g_bytes + 757),
         9),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[2].base,
-                                       7, g_bytes + 12),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[50].base,
-                                       3, g_bytes + 760),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[2].base, 7, g_bytes + 12),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[50].base, 3, g_bytes + 760),
         10),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[2].base,
-                                       7, g_bytes + 12),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[51].base,
-                                       3, g_bytes + 763),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[2].base, 7, g_bytes + 12),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[51].base, 3, g_bytes + 763),
         11),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[2].base,
-                                       7, g_bytes + 12),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[52].base,
-                                       3, g_bytes + 766),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[2].base, 7, g_bytes + 12),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[52].base, 3, g_bytes + 766),
         12),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[2].base,
-                                       7, g_bytes + 12),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[53].base,
-                                       3, g_bytes + 769),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[2].base, 7, g_bytes + 12),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[53].base, 3, g_bytes + 769),
         13),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[54].base,
-                                       14, g_bytes + 772),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[54].base, 14, g_bytes + 772),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         14),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[16].base,
-                                       15, g_bytes + 186),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[55].base,
-                                       13, g_bytes + 786),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[16].base, 15, g_bytes + 186),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[55].base, 13, g_bytes + 786),
         15),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[56].base,
-                                       15, g_bytes + 799),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[56].base, 15, g_bytes + 799),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         16),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[57].base,
-                                       13, g_bytes + 814),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[57].base, 13, g_bytes + 814),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         17),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[58].base,
-                                       6, g_bytes + 827),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[58].base, 6, g_bytes + 827),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         18),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[59].base,
-                                       27, g_bytes + 833),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[59].base, 27, g_bytes + 833),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         19),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[60].base,
-                                       3, g_bytes + 860),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[60].base, 3, g_bytes + 860),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         20),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[61].base,
-                                       5, g_bytes + 863),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[61].base, 5, g_bytes + 863),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         21),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[62].base,
-                                       13, g_bytes + 868),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[62].base, 13, g_bytes + 868),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         22),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[63].base,
-                                       13, g_bytes + 881),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[63].base, 13, g_bytes + 881),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         23),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[64].base,
-                                       19, g_bytes + 894),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[64].base, 19, g_bytes + 894),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         24),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[15].base,
-                                       16, g_bytes + 170),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[15].base, 16, g_bytes + 170),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         25),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[65].base,
-                                       16, g_bytes + 913),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[65].base, 16, g_bytes + 913),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         26),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[66].base,
-                                       14, g_bytes + 929),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[66].base, 14, g_bytes + 929),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         27),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[67].base,
-                                       16, g_bytes + 943),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[67].base, 16, g_bytes + 943),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         28),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[68].base,
-                                       13, g_bytes + 959),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[68].base, 13, g_bytes + 959),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         29),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[14].base,
-                                       12, g_bytes + 158),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[14].base, 12, g_bytes + 158),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         30),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[69].base,
-                                       6, g_bytes + 972),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[69].base, 6, g_bytes + 972),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         31),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[70].base,
-                                       4, g_bytes + 978),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[70].base, 4, g_bytes + 978),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         32),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[71].base,
-                                       4, g_bytes + 982),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[71].base, 4, g_bytes + 982),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         33),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[72].base,
-                                       6, g_bytes + 986),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[72].base, 6, g_bytes + 986),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         34),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[73].base,
-                                       7, g_bytes + 992),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[73].base, 7, g_bytes + 992),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         35),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[74].base,
-                                       4, g_bytes + 999),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[74].base, 4, g_bytes + 999),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         36),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[20].base,
-                                       4, g_bytes + 278),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[20].base, 4, g_bytes + 278),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         37),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[75].base,
-                                       8, g_bytes + 1003),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[75].base, 8, g_bytes + 1003),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         38),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[76].base,
-                                       17, g_bytes + 1011),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[76].base, 17, g_bytes + 1011),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         39),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[77].base,
-                                       13, g_bytes + 1028),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[77].base, 13, g_bytes + 1028),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         40),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[78].base,
-                                       8, g_bytes + 1041),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[78].base, 8, g_bytes + 1041),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         41),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[79].base,
-                                       19, g_bytes + 1049),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[79].base, 19, g_bytes + 1049),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         42),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[80].base,
-                                       13, g_bytes + 1068),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[80].base, 13, g_bytes + 1068),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         43),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[81].base,
-                                       4, g_bytes + 1081),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[81].base, 4, g_bytes + 1081),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         44),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[82].base,
-                                       8, g_bytes + 1085),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[82].base, 8, g_bytes + 1085),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         45),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[83].base,
-                                       12, g_bytes + 1093),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[83].base, 12, g_bytes + 1093),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         46),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[84].base,
-                                       18, g_bytes + 1105),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[84].base, 18, g_bytes + 1105),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         47),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[85].base,
-                                       19, g_bytes + 1123),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[85].base, 19, g_bytes + 1123),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         48),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[86].base,
-                                       5, g_bytes + 1142),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[86].base, 5, g_bytes + 1142),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         49),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[87].base,
-                                       7, g_bytes + 1147),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[87].base, 7, g_bytes + 1147),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         50),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[88].base,
-                                       7, g_bytes + 1154),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[88].base, 7, g_bytes + 1154),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         51),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[89].base,
-                                       11, g_bytes + 1161),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[89].base, 11, g_bytes + 1161),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         52),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[90].base,
-                                       6, g_bytes + 1172),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[90].base, 6, g_bytes + 1172),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         53),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[91].base,
-                                       10, g_bytes + 1178),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[91].base, 10, g_bytes + 1178),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         54),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[92].base,
-                                       25, g_bytes + 1188),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[92].base, 25, g_bytes + 1188),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         55),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[93].base,
-                                       17, g_bytes + 1213),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[93].base, 17, g_bytes + 1213),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         56),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[19].base,
-                                       10, g_bytes + 268),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[19].base, 10, g_bytes + 268),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         57),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[94].base,
-                                       4, g_bytes + 1230),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[94].base, 4, g_bytes + 1230),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         58),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[95].base,
-                                       3, g_bytes + 1234),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[95].base, 3, g_bytes + 1234),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         59),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[96].base,
-                                       16, g_bytes + 1237),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[96].base, 16, g_bytes + 1237),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         60),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[7].base,
-                                       11, g_bytes + 50),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[97].base,
-                                       1, g_bytes + 1253),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[7].base, 11, g_bytes + 50),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[97].base, 1, g_bytes + 1253),
         61),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[7].base,
-                                       11, g_bytes + 50),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[24].base,
-                                       1, g_bytes + 342),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[7].base, 11, g_bytes + 50),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[24].base, 1, g_bytes + 342),
         62),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[7].base,
-                                       11, g_bytes + 50),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[25].base,
-                                       1, g_bytes + 343),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[7].base, 11, g_bytes + 50),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[25].base, 1, g_bytes + 343),
         63),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[9].base,
-                                       13, g_bytes + 77),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[98].base,
-                                       8, g_bytes + 1254),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[9].base, 13, g_bytes + 77),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[98].base, 8, g_bytes + 1254),
         64),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[9].base,
-                                       13, g_bytes + 77),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[39].base,
-                                       4, g_bytes + 708),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[9].base, 13, g_bytes + 77),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[39].base, 4, g_bytes + 708),
         65),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[9].base,
-                                       13, g_bytes + 77),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[38].base,
-                                       7, g_bytes + 701),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[9].base, 13, g_bytes + 77),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[38].base, 7, g_bytes + 701),
         66),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[5].base,
-                                       2, g_bytes + 36),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[99].base,
-                                       8, g_bytes + 1262),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[5].base, 2, g_bytes + 36),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[99].base, 8, g_bytes + 1262),
         67),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[14].base,
-                                       12, g_bytes + 158),
         grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[100].base, 16, g_bytes + 1270),
+            &grpc_static_metadata_refcounts()[14].base, 12, g_bytes + 158),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[100].base, 16, g_bytes + 1270),
         68),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[4].base,
-                                       7, g_bytes + 29),
         grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[101].base, 4, g_bytes + 1286),
+            &grpc_static_metadata_refcounts()[4].base, 7, g_bytes + 29),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[101].base, 4, g_bytes + 1286),
         69),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[1].base,
-                                       7, g_bytes + 5),
         grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[102].base, 3, g_bytes + 1290),
+            &grpc_static_metadata_refcounts()[1].base, 7, g_bytes + 5),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[102].base, 3, g_bytes + 1290),
         70),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[16].base,
-                                       15, g_bytes + 186),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[16].base, 15, g_bytes + 186),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         71),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[15].base,
-                                       16, g_bytes + 170),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[98].base,
-                                       8, g_bytes + 1254),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[15].base, 16, g_bytes + 170),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[98].base, 8, g_bytes + 1254),
         72),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[15].base,
-                                       16, g_bytes + 170),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[39].base,
-                                       4, g_bytes + 708),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[15].base, 16, g_bytes + 170),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[39].base, 4, g_bytes + 708),
         73),
     grpc_core::StaticMetadata(
         grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[103].base, 11, g_bytes + 1293),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[28].base,
-                                       0, g_bytes + 346),
+            &grpc_static_metadata_refcounts()[103].base, 11, g_bytes + 1293),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[28].base, 0, g_bytes + 346),
         74),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[10].base,
-                                       20, g_bytes + 90),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[98].base,
-                                       8, g_bytes + 1254),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[10].base, 20, g_bytes + 90),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[98].base, 8, g_bytes + 1254),
         75),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[10].base,
-                                       20, g_bytes + 90),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[38].base,
-                                       7, g_bytes + 701),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[10].base, 20, g_bytes + 90),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[38].base, 7, g_bytes + 701),
         76),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[10].base,
-                                       20, g_bytes + 90),
         grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[104].base, 16, g_bytes + 1304),
+            &grpc_static_metadata_refcounts()[10].base, 20, g_bytes + 90),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[104].base, 16, g_bytes + 1304),
         77),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[10].base,
-                                       20, g_bytes + 90),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[39].base,
-                                       4, g_bytes + 708),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[10].base, 20, g_bytes + 90),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[39].base, 4, g_bytes + 708),
         78),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[10].base,
-                                       20, g_bytes + 90),
         grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[105].base, 13, g_bytes + 1320),
+            &grpc_static_metadata_refcounts()[10].base, 20, g_bytes + 90),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[105].base, 13, g_bytes + 1320),
         79),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[10].base,
-                                       20, g_bytes + 90),
         grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[106].base, 12, g_bytes + 1333),
+            &grpc_static_metadata_refcounts()[10].base, 20, g_bytes + 90),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[106].base, 12, g_bytes + 1333),
         80),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[10].base,
-                                       20, g_bytes + 90),
         grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[107].base, 21, g_bytes + 1345),
+            &grpc_static_metadata_refcounts()[10].base, 20, g_bytes + 90),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[107].base, 21, g_bytes + 1345),
         81),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[16].base,
-                                       15, g_bytes + 186),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[98].base,
-                                       8, g_bytes + 1254),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[16].base, 15, g_bytes + 186),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[98].base, 8, g_bytes + 1254),
         82),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[16].base,
-                                       15, g_bytes + 186),
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[39].base,
-                                       4, g_bytes + 708),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[16].base, 15, g_bytes + 186),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[39].base, 4, g_bytes + 708),
         83),
     grpc_core::StaticMetadata(
-        grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[16].base,
-                                       15, g_bytes + 186),
         grpc_core::StaticMetadataSlice(
-            &grpc_static_metadata_refcounts[105].base, 13, g_bytes + 1320),
+            &grpc_static_metadata_refcounts()[16].base, 15, g_bytes + 186),
+        grpc_core::StaticMetadataSlice(
+            &grpc_static_metadata_refcounts()[105].base, 13, g_bytes + 1320),
         84),
 };
 const uint8_t grpc_static_accept_encoding_metadata[8] = {0,  75, 76, 77,

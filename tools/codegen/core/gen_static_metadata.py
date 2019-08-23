@@ -393,9 +393,15 @@ for i, elem in enumerate(all_strs):
     str_ofs += len(elem)
 
 
+def slice_def_for_ctx(i):
+    return (
+        'grpc_core::StaticMetadataSlice(&refcounts[%d].base, %d, g_bytes+%d)'
+    ) % (i, len(all_strs[i]), id2strofs[i])
+
+
 def slice_def(i):
     return (
-        'grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts[%d].base, %d, g_bytes+%d)'
+        'grpc_core::StaticMetadataSlice(&grpc_static_metadata_refcounts()[%d].base, %d, g_bytes+%d)'
     ) % (i, len(all_strs[i]), id2strofs[i])
 
 
@@ -408,36 +414,60 @@ static_slice_dest_assert = (
     '"grpc_core::StaticMetadataSlice must be trivially destructible.");')
 print >> H, static_slice_dest_assert
 print >> H, '#define GRPC_STATIC_MDSTR_COUNT %d' % len(all_strs)
-print >> H, ('extern const grpc_core::StaticMetadataSlice '
-             'grpc_static_slice_table[GRPC_STATIC_MDSTR_COUNT];')
+print >> H, ('const grpc_core::StaticMetadataSlice* '
+             'grpc_static_slice_table();')
 for i, elem in enumerate(all_strs):
     print >> H, '/* "%s" */' % elem
-    print >> H, '#define %s (grpc_static_slice_table[%d])' % (
+    print >> H, '#define %s (grpc_static_slice_table()[%d])' % (
         mangle(elem).upper(), i)
 print >> H
 print >> C, 'static uint8_t g_bytes[] = {%s};' % (','.join(
     '%d' % ord(c) for c in ''.join(all_strs)))
 print >> C
 print >> H, ('namespace grpc_core { struct StaticSliceRefcount; }')
-print >> H, ('extern grpc_core::StaticSliceRefcount '
-             'grpc_static_metadata_refcounts[GRPC_STATIC_MDSTR_COUNT];')
+print >> H, ('grpc_core::StaticSliceRefcount* '
+             'grpc_static_metadata_refcounts();')
 print >> C, 'grpc_slice_refcount grpc_core::StaticSliceRefcount::kStaticSubRefcount;'
-print >> C, ('grpc_core::StaticSliceRefcount '
-             'grpc_static_metadata_refcounts[GRPC_STATIC_MDSTR_COUNT] = {')
+print >> C, '''
+struct StaticMetadataSliceCtx {
+  grpc_core::StaticSliceRefcount
+    refcounts[GRPC_STATIC_MDSTR_COUNT] = {
+'''
 for i, elem in enumerate(all_strs):
     print >> C, '  grpc_core::StaticSliceRefcount(%d), ' % i
-print >> C, '};'
+print >> C, '};'  # static slice refcounts
+print >> C
+print >> C, '''
+  const grpc_core::StaticMetadataSlice
+    slices[GRPC_STATIC_MDSTR_COUNT] = {
+'''
+for i, elem in enumerate(all_strs):
+    print >> C, slice_def_for_ctx(i) + ','
+print >> C, '};'  # static slices
+print >> C, '};'  # struct StaticMetadataSliceCtx
+print >> C
+print >> C, '''
+static StaticMetadataSliceCtx& static_metadata_slice_ctx() {
+  static StaticMetadataSliceCtx* ctx = grpc_core::New<StaticMetadataSliceCtx>();
+  return *ctx;
+}
+
+
+const grpc_core::StaticMetadataSlice*
+  grpc_static_slice_table() {
+  return static_metadata_slice_ctx().slices;
+}
+
+grpc_core::StaticSliceRefcount*
+    grpc_static_metadata_refcounts() {
+  return static_metadata_slice_ctx().refcounts;
+}
+'''
 print >> C
 print >> H, '#define GRPC_IS_STATIC_METADATA_STRING(slice) \\'
 print >> H, ('  ((slice).refcount != NULL && (slice).refcount->GetType() == '
              'grpc_slice_refcount::Type::STATIC)')
 print >> H
-print >> C, (
-    'const grpc_core::StaticMetadataSlice grpc_static_slice_table[GRPC_STATIC_MDSTR_COUNT]'
-    ' = {')
-for i, elem in enumerate(all_strs):
-    print >> C, slice_def(i) + ','
-print >> C, '};'
 print >> C
 print >> H, '#define GRPC_STATIC_METADATA_INDEX(static_slice) \\'
 print >> H, '(reinterpret_cast<grpc_core::StaticSliceRefcount*>((static_slice).refcount)->index)'
