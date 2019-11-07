@@ -1,7 +1,7 @@
 ## Multiprocessing with gRPC Python
 
 Multiprocessing allows application developers to sidestep the Python global
-interpreter lock and achieve true concurrency on multicore systems.
+interpreter lock and achieve true parallelism on multicore systems.
 Unfortunately, using multiprocessing and gRPC Python is not yet as simple as
 instantiating your server with a `futures.ProcessPoolExecutor`.
 
@@ -18,12 +18,7 @@ take advantage of this to parallelize their CPU-intensive operations.
 
 This example calculates the first 10,000 prime numbers as an RPC. We instantiate
 one server per subprocess, balancing requests between the servers using the
-[`SO_REUSEPORT`](https://lwn.net/Articles/542629/) socket option. Note that this
-option is not available in `manylinux1` distributions, which are, as of the time
-of writing, the only gRPC Python wheels available on PyPI. To take advantage of this
-feature, you'll need to build from source, either using bazel (as we do for
-these examples) or via pip, using `pip install grpcio --no-binary grpcio`.
-
+[`SO_REUSEPORT`](https://lwn.net/Articles/542629/) socket option.
 ```python
 _PROCESS_COUNT = multiprocessing.cpu_count()
 ```
