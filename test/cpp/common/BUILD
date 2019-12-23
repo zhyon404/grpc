@@ -110,8 +110,8 @@ grpc_cc_test(
 )
 
 grpc_cc_test(
-    name = "alts_context_test",
-    srcs = ["alts_context_test.cc"],
+    name = "alts_context_util_test",
+    srcs = ["alts_context_util_test.cc"],
     external_deps = [
         "gtest",
     ],

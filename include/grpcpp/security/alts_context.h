@@ -16,8 +16,8 @@
  *
  */
 
-#ifndef GRPCPP_ALTS_CONTEXT_H
-#define GRPCPP_ALTS_CONTEXT_H
+#ifndef GRPCPP_SECURITY_ALTS_CONTEXT_H
+#define GRPCPP_SECURITY_ALTS_CONTEXT_H
 
 #include <grpc/grpc_security_constants.h>
 #include <grpcpp/impl/codegen/security/auth_context.h>
@@ -60,13 +60,7 @@ class AltsContext {
   RpcProtocolVersions peer_rpc_versions_ = {{0, 0}, {0, 0}};
 };
 
-// GetAltsContextFromAuthContext helps to get the AltsContext from AuthContext.
-// If ALTS is not the transport security protocol used to establish the
-// connection, this function will return nullptr.
-std::unique_ptr<AltsContext> GetAltsContextFromAuthContext(
-    const AuthContext& auth_context);
-
 }  // namespace experimental
 }  // namespace grpc
 
-#endif  // GRPCPP_ALTS_CONTEXT_H
+#endif  // GRPCPP_SECURITY_ALTS_CONTEXT_H

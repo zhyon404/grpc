@@ -17,11 +17,9 @@
  */
 
 #include <grpc/grpc_security.h>
-#include <grpcpp/alts_context.h>
+#include <grpcpp/security/alts_context.h>
 
-#include "src/core/lib/gprpp/memory.h"
 #include "src/core/tsi/alts/handshaker/alts_tsi_handshaker.h"
-#include "src/cpp/common/secure_auth_context.h"
 #include "src/proto/grpc/gcp/altscontext.upb.h"
 
 namespace grpc {
@@ -100,29 +98,6 @@ grpc_security_level AltsContext::security_level() const {
 
 AltsContext::RpcProtocolVersions AltsContext::peer_rpc_versions() const {
   return peer_rpc_versions_;
-}
-
-std::unique_ptr<AltsContext> GetAltsContextFromAuthContext(
-    const AuthContext& auth_context) {
-  std::vector<string_ref> ctx_vector =
-      auth_context.FindPropertyValues(TSI_ALTS_CONTEXT);
-  if (ctx_vector.size() != 1) {
-    gpr_log(GPR_ERROR, "contains zero or more than one ALTS context.");
-    return nullptr;
-  }
-  upb::Arena context_arena;
-  grpc_gcp_AltsContext* ctx = grpc_gcp_AltsContext_parse(
-      ctx_vector[0].data(), ctx_vector[0].size(), context_arena.ptr());
-  if (ctx == nullptr) {
-    gpr_log(GPR_ERROR, "fails to parse ALTS context.");
-    return nullptr;
-  }
-  if (grpc_gcp_AltsContext_security_level(ctx) < GRPC_SECURITY_MIN ||
-      grpc_gcp_AltsContext_security_level(ctx) > GRPC_SECURITY_MAX) {
-    gpr_log(GPR_ERROR, "security_level is invalid.");
-    return nullptr;
-  }
-  return grpc_core::MakeUnique<AltsContext>(AltsContext(ctx));
 }
 
 }  // namespace experimental

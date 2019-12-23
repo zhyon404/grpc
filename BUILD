@@ -432,9 +432,11 @@ grpc_cc_library(
     name = "grpc++_alts",
     srcs = [
         "src/cpp/common/alts_context.cc",
+        "src/cpp/common/alts_util.cc",
     ],
     hdrs = [
-        "include/grpcpp/alts_context.h",
+        "include/grpcpp/security/alts_context.h",
+        "include/grpcpp/security/alts_util.h",
     ],
     language = "c++",
     standalone = True,

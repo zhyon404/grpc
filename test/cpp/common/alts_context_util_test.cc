@@ -16,7 +16,8 @@
  *
  */
 
-#include <grpcpp/alts_context.h>
+#include <grpcpp/security/alts_context.h>
+#include <grpcpp/security/alts_util.h>
 #include <grpcpp/security/auth_context.h>
 #include <gtest/gtest.h>
 
@@ -28,14 +29,21 @@
 namespace grpc {
 namespace {
 
-TEST(AltsContextTest, EmptyAuthContext) {
+TEST(AltsContextUtilTest, EmptyAuthContext) {
   SecureAuthContext auth_context(nullptr);
   std::unique_ptr<experimental::AltsContext> alts_context =
       experimental::GetAltsContextFromAuthContext(auth_context);
   EXPECT_EQ(alts_context.get(), nullptr);
+
+  // AltsClientAuthzCheck function should return an internal error on the bad
+  // auth_context
+  std::vector<std::string> service_accounts{"server"};
+  grpc::Status good_status =
+      experimental::AltsClientAuthzCheck(auth_context, service_accounts);
+  EXPECT_EQ(grpc::StatusCode::INTERNAL, good_status.error_code());
 }
 
-TEST(AltsContextTest, AuthContextWithMoreThanOneAltsContext) {
+TEST(AltsContextUtilTest, AuthContextWithMoreThanOneAltsContext) {
   grpc_core::RefCountedPtr<grpc_auth_context> ctx =
       grpc_core::MakeRefCounted<grpc_auth_context>(nullptr);
   SecureAuthContext auth_context(ctx.get());
@@ -47,7 +55,7 @@ TEST(AltsContextTest, AuthContextWithMoreThanOneAltsContext) {
   EXPECT_EQ(alts_context.get(), nullptr);
 }
 
-TEST(AltsContextTest, AuthContextWithBadAltsContext) {
+TEST(AltsContextUtilTest, AuthContextWithBadAltsContext) {
   grpc_core::RefCountedPtr<grpc_auth_context> ctx =
       grpc_core::MakeRefCounted<grpc_auth_context>(nullptr);
   SecureAuthContext auth_context(ctx.get());
@@ -59,7 +67,7 @@ TEST(AltsContextTest, AuthContextWithBadAltsContext) {
   EXPECT_EQ(alts_context.get(), nullptr);
 }
 
-TEST(AltsContextTest, AuthContextWithGoodAltsContextWithoutRpcVersions) {
+TEST(AltsContextUtilTest, AuthContextWithGoodAltsContextWithoutRpcVersions) {
   grpc_core::RefCountedPtr<grpc_auth_context> ctx =
       grpc_core::MakeRefCounted<grpc_auth_context>(nullptr);
   SecureAuthContext auth_context(ctx.get());
@@ -105,7 +113,7 @@ TEST(AltsContextTest, AuthContextWithGoodAltsContextWithoutRpcVersions) {
   EXPECT_EQ(0, rpc_protocol_versions.min_rpc_version.minor_version);
 }
 
-TEST(AltsContextTest, AuthContextWithGoodAltsContext) {
+TEST(AltsContextUtilTest, AuthContextWithGoodAltsContext) {
   grpc_core::RefCountedPtr<grpc_auth_context> ctx =
       grpc_core::MakeRefCounted<grpc_auth_context>(nullptr);
   SecureAuthContext auth_context(ctx.get());
@@ -142,6 +150,34 @@ TEST(AltsContextTest, AuthContextWithGoodAltsContext) {
   EXPECT_EQ(0, rpc_protocol_versions.max_rpc_version.minor_version);
   EXPECT_EQ(0, rpc_protocol_versions.min_rpc_version.major_version);
   EXPECT_EQ(0, rpc_protocol_versions.min_rpc_version.minor_version);
+}
+
+TEST(AltsContextUtilTest, AltsClientAuthzCheckFunction) {
+  grpc_core::RefCountedPtr<grpc_auth_context> ctx =
+      grpc_core::MakeRefCounted<grpc_auth_context>(nullptr);
+  SecureAuthContext auth_context(ctx.get());
+  ctx.reset();
+
+  grpc::string peer("good_server");
+  std::vector<std::string> good_service_accounts{"good_server",
+                                                 "good_server_1"};
+  std::vector<std::string> bad_service_accounts{"bad_server", "bad_server_1"};
+  upb::Arena context_arena;
+  grpc_gcp_AltsContext* context = grpc_gcp_AltsContext_new(context_arena.ptr());
+  grpc_gcp_AltsContext_set_peer_service_account(
+      context, upb_strview_make(peer.data(), peer.length()));
+  size_t serialized_ctx_length;
+  char* serialized_ctx = grpc_gcp_AltsContext_serialize(
+      context, context_arena.ptr(), &serialized_ctx_length);
+  EXPECT_NE(serialized_ctx, nullptr);
+  auth_context.AddProperty(TSI_ALTS_CONTEXT,
+                           string(serialized_ctx, serialized_ctx_length));
+  grpc::Status good_status =
+      experimental::AltsClientAuthzCheck(auth_context, good_service_accounts);
+  EXPECT_EQ(grpc::StatusCode::OK, good_status.error_code());
+  grpc::Status bad_status =
+      experimental::AltsClientAuthzCheck(auth_context, bad_service_accounts);
+  EXPECT_EQ(grpc::StatusCode::PERMISSION_DENIED, bad_status.error_code());
 }
 
 }  // namespace

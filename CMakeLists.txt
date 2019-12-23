@@ -635,7 +635,7 @@ if(gRPC_BUILD_TESTS)
   if(_gRPC_PLATFORM_LINUX)
     add_dependencies(buildtests_cxx alts_concurrent_connectivity_test)
   endif()
-  add_dependencies(buildtests_cxx alts_context_test)
+  add_dependencies(buildtests_cxx alts_context_util_test)
   add_dependencies(buildtests_cxx alts_counter_test)
   add_dependencies(buildtests_cxx alts_crypt_test)
   add_dependencies(buildtests_cxx alts_crypter_test)
@@ -3831,6 +3831,7 @@ endif()
 
 add_library(grpc++_alts
   src/cpp/common/alts_context.cc
+  src/cpp/common/alts_util.cc
 )
 
 set_target_properties(grpc++_alts PROPERTIES
@@ -3869,8 +3870,9 @@ target_link_libraries(grpc++_alts
 )
 
 foreach(_hdr
-  include/grpcpp/alts_context.h
   include/grpcpp/impl/codegen/security/auth_context.h
+  include/grpcpp/security/alts_context.h
+  include/grpcpp/security/alts_util.h
 )
   string(REPLACE "include/" "" _path ${_hdr})
   get_filename_component(_path ${_path} PATH)
@@ -9912,13 +9914,13 @@ endif()
 endif()
 if(gRPC_BUILD_TESTS)
 
-add_executable(alts_context_test
-  test/cpp/common/alts_context_test.cc
+add_executable(alts_context_util_test
+  test/cpp/common/alts_context_util_test.cc
   third_party/googletest/googletest/src/gtest-all.cc
   third_party/googletest/googlemock/src/gmock-all.cc
 )
 
-target_include_directories(alts_context_test
+target_include_directories(alts_context_util_test
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -9935,7 +9937,7 @@ target_include_directories(alts_context_test
     ${_gRPC_PROTO_GENS_DIR}
 )
 
-target_link_libraries(alts_context_test
+target_link_libraries(alts_context_util_test
   ${_gRPC_PROTOBUF_LIBRARIES}
   ${_gRPC_ALLTARGETS_LIBRARIES}
   grpc++_test_util

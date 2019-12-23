@@ -1757,6 +1757,7 @@
       ],
       'sources': [
         'src/cpp/common/alts_context.cc',
+        'src/cpp/common/alts_util.cc',
       ],
     },
     {

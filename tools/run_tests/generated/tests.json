@@ -2998,7 +2998,7 @@
     "flaky": false, 
     "gtest": false, 
     "language": "c++", 
-    "name": "alts_context_test", 
+    "name": "alts_context_util_test", 
     "platforms": [
       "linux", 
       "mac", 
