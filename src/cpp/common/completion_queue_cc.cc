@@ -1,38 +1,41 @@
-/*
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <memory>
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <grpc/grpc.h>
 #include <grpc/support/cpu.h>
-#include <grpc/support/log.h>
+#include <grpc/support/sync.h>
+#include <grpc/support/time.h>
 #include <grpcpp/completion_queue.h>
+#include <grpcpp/impl/completion_queue_tag.h>
 #include <grpcpp/impl/grpc_library.h>
-#include <grpcpp/support/time.h>
 
-#include "src/core/lib/gpr/useful.h"
-#include "src/core/lib/gprpp/manual_constructor.h"
-#include "src/core/lib/gprpp/sync.h"
-#include "src/core/lib/gprpp/thd.h"
+#include <vector>
+
+#include "src/core/lib/experiments/experiments.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/grpc_check.h"
+#include "src/core/util/sync.h"
+#include "src/core/util/thd.h"
+#include "src/core/util/useful.h"
+#include "absl/base/thread_annotations.h"
+#include "absl/log/log.h"
 
 namespace grpc {
 namespace {
-
-internal::GrpcLibraryInitializer g_gli_initializer;
 
 gpr_once g_once_init_callback_alternative = GPR_ONCE_INIT;
 grpc_core::Mutex* g_callback_alternative_mu;
@@ -48,7 +51,7 @@ struct CallbackAlternativeCQ {
       ABSL_GUARDED_BY(g_callback_alternative_mu);
 
   CompletionQueue* Ref() {
-    grpc_core::MutexLock lock(&*g_callback_alternative_mu);
+    grpc_core::MutexLock lock(*g_callback_alternative_mu);
     refs++;
     if (refs == 1) {
       cq = new CompletionQueue;
@@ -82,7 +85,7 @@ struct CallbackAlternativeCQ {
                                    gpr_time_from_millis(100, GPR_TIMESPAN)));
                   continue;
                 }
-                GPR_DEBUG_ASSERT(ev.type == GRPC_OP_COMPLETE);
+                GRPC_DCHECK(ev.type == GRPC_OP_COMPLETE);
                 // We can always execute the callback inline rather than
                 // pushing it to another Executor thread because this
                 // thread is definitely running on a background thread, does not
@@ -103,7 +106,7 @@ struct CallbackAlternativeCQ {
   }
 
   void Unref() {
-    grpc_core::MutexLock lock(g_callback_alternative_mu);
+    grpc_core::MutexLock lock(*g_callback_alternative_mu);
     refs--;
     if (refs == 0) {
       cq->Shutdown();
@@ -125,16 +128,14 @@ CallbackAlternativeCQ g_callback_alternative_cq;
 // a 'grpc_completion_queue' instance (which is being passed as the input to
 // this constructor), one must have already called grpc_init().
 CompletionQueue::CompletionQueue(grpc_completion_queue* take)
-    : GrpcLibraryCodegen(false), cq_(take) {
+    : GrpcLibrary(false), cq_(take) {
   InitialAvalanching();
 }
 
 void CompletionQueue::Shutdown() {
-  g_gli_initializer.summon();
 #ifndef NDEBUG
   if (!ServerListEmpty()) {
-    gpr_log(GPR_ERROR,
-            "CompletionQueue shutdown being shutdown before its server.");
+    LOG(ERROR) << "CompletionQueue shutdown being shutdown before its server.";
   }
 #endif
   CompleteAvalanching();
@@ -169,7 +170,7 @@ CompletionQueue::CompletionQueueTLSCache::CompletionQueueTLSCache(
 }
 
 CompletionQueue::CompletionQueueTLSCache::~CompletionQueueTLSCache() {
-  GPR_ASSERT(flushed_);
+  GRPC_CHECK(flushed_);
 }
 
 bool CompletionQueue::CompletionQueueTLSCache::Flush(void** tag, bool* ok) {
@@ -189,6 +190,9 @@ bool CompletionQueue::CompletionQueueTLSCache::Flush(void** tag, bool* ok) {
 }
 
 CompletionQueue* CompletionQueue::CallbackAlternativeCQ() {
+  if (grpc_core::IsEventEngineCallbackCqEnabled()) {
+    grpc_core::Crash("CallbackAlternativeCQ should not be instantiated");
+  }
   gpr_once_init(&g_once_init_callback_alternative,
                 [] { g_callback_alternative_mu = new grpc_core::Mutex(); });
   return g_callback_alternative_cq.Ref();
@@ -199,7 +203,7 @@ void CompletionQueue::ReleaseCallbackAlternativeCQ(CompletionQueue* cq)
   (void)cq;
   // This accesses g_callback_alternative_cq without acquiring the mutex
   // but it's considered safe because it just reads the pointer address.
-  GPR_DEBUG_ASSERT(cq == g_callback_alternative_cq.cq);
+  GRPC_DCHECK(cq == g_callback_alternative_cq.cq);
   g_callback_alternative_cq.Unref();
 }
 

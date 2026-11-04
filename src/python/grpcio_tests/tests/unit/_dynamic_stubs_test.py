@@ -29,7 +29,7 @@ _DATA_DIR = os.path.join("tests", "unit", "data")
 @contextlib.contextmanager
 def _grpc_tools_unimportable():
     original_sys_path = sys.path
-    sys.path = [path for path in sys.path if "grpcio_tools" not in path]
+    sys.path = [path for path in sys.path if "grpcio_tools" not in str(path)]
     try:
         import grpc_tools
     except ImportError:
@@ -45,7 +45,6 @@ def _grpc_tools_unimportable():
 
 
 def _collect_errors(fn):
-
     @functools.wraps(fn)
     def _wrapped(error_queue):
         try:
@@ -57,21 +56,17 @@ def _collect_errors(fn):
     return _wrapped
 
 
-def _python3_check(fn):
-
-    @functools.wraps(fn)
-    def _wrapped():
-        if sys.version_info[0] == 3:
-            fn()
-        else:
-            _assert_unimplemented("Python 3")
-
-    return _wrapped
-
-
 def _run_in_subprocess(test_case):
+    # The default start method of multiprocessing in linux has changed to
+    # `forkserver` instead of `fork` from Python 3.14. This causes problems
+    # with pickling target methods that use decorators.
+    # Hence manually set to use the `fork` start method.
+    if sys.version_info >= (3, 14) and ("linux" in sys.platform):
+        multiprocessing.set_start_method("fork", force=True)
+
     sys.path.insert(
-        0, os.path.join(os.path.realpath(os.path.dirname(__file__)), ".."))
+        0, os.path.join(os.path.realpath(os.path.dirname(__file__)), "..")
+    )
     error_queue = multiprocessing.Queue()
     proc = multiprocessing.Process(target=test_case, args=(error_queue,))
     proc.start()
@@ -80,43 +75,48 @@ def _run_in_subprocess(test_case):
     if not error_queue.empty():
         raise error_queue.get()
     assert proc.exitcode == 0, "Process exited with code {}".format(
-        proc.exitcode)
+        proc.exitcode
+    )
 
 
 def _assert_unimplemented(msg_substr):
     import grpc
+
     try:
         protos, services = grpc.protos_and_services(
-            "tests/unit/data/foo/bar.proto")
+            "tests/unit/data/foo/bar.proto"
+        )
     except NotImplementedError as e:
         assert msg_substr in str(e), "{} was not in '{}'".format(
-            msg_substr, str(e))
+            msg_substr, str(e)
+        )
     else:
         assert False, "Did not raise NotImplementedError"
 
 
 @_collect_errors
-@_python3_check
 def _test_sunny_day():
     import grpc
+
     protos, services = grpc.protos_and_services(
-        os.path.join(_DATA_DIR, "foo", "bar.proto"))
+        os.path.join(_DATA_DIR, "foo", "bar.proto")
+    )
     assert protos.BarMessage is not None
     assert services.BarStub is not None
 
 
 @_collect_errors
-@_python3_check
 def _test_well_known_types():
     import grpc
+
     protos, services = grpc.protos_and_services(
-        os.path.join(_DATA_DIR, "foo", "bar_with_wkt.proto"))
+        os.path.join(_DATA_DIR, "foo", "bar_with_wkt.proto")
+    )
     assert protos.BarMessage is not None
     assert services.BarStub is not None
 
 
 @_collect_errors
-@_python3_check
 def _test_grpc_tools_unimportable():
     with _grpc_tools_unimportable():
         _assert_unimplemented("grpcio-tools")
@@ -124,12 +124,12 @@ def _test_grpc_tools_unimportable():
 
 # NOTE(rbellevi): multiprocessing.Process fails to pickle function objects
 # when they do not come from the "__main__" module, so this test passes
-# if run directly on Windows, but not if started by the test runner.
-@unittest.skipIf(os.name == "nt", "Windows multiprocessing unsupported")
-@unittest.skipIf(test_common.running_under_gevent(),
-                 "Import paths do not work with gevent runner.")
+# if run directly on Windows or MacOS, but not if started by the test runner.
+@unittest.skipIf(
+    os.name == "nt" or "darwin" in sys.platform,
+    "Windows and MacOS multiprocessing unsupported",
+)
 class DynamicStubTest(unittest.TestCase):
-
     def test_sunny_day(self):
         _run_in_subprocess(_test_sunny_day)
 

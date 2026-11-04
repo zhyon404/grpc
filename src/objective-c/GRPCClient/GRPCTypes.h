@@ -154,8 +154,6 @@ typedef NS_ENUM(NSUInteger, GRPCTransportType) {
   GRPCTransportTypeDefault = 0,
   /** gRPC internal HTTP/2 stack with BoringSSL */
   GRPCTransportTypeChttp2BoringSSL = 0,
-  /** Cronet stack */
-  GRPCTransportTypeCronet,
   /** Insecure channel. FOR TEST ONLY! */
   GRPCTransportTypeInsecure,
 };
@@ -171,7 +169,7 @@ extern NSString* _Nonnull const kGRPCHeadersKey;
 extern NSString* _Nonnull const kGRPCTrailersKey;
 
 /** The id of a transport implementation. */
-typedef char* _Nonnull GRPCTransportID;
+typedef const char* _Nonnull GRPCTransportID;
 
 /**
  * Implement this protocol to provide a token to gRPC when a call is initiated.
@@ -182,7 +180,7 @@ typedef char* _Nonnull GRPCTransportID;
  * This method is called when gRPC is about to start the call. When OAuth token is acquired,
  * \a handler is expected to be called with \a token being the new token to be used for this call.
  */
-- (void)getTokenWithHandler:(void (^_Nonnull)(NSString* _Nullable token))handler;
+- (void)getTokenWithHandler:(void (^NS_SWIFT_SENDABLE _Nonnull)(NSString* _Nullable token))handler;
 
 @end
 

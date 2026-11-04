@@ -40,7 +40,7 @@ def _generate_objc_impl(ctx):
     protos = [
         f
         for src in ctx.attr.deps
-        for f in src[ProtoInfo].transitive_imports.to_list()
+        for f in src[ProtoInfo].transitive_sources.to_list()
     ]
 
     target_package = _join_directories([ctx.label.workspace_root, ctx.label.package])
@@ -163,10 +163,10 @@ generate_objc = rule(
             providers = [ProtoInfo],
         ),
         "plugin": attr.label(
-            default = "@com_github_grpc_grpc//src/compiler:grpc_objective_c_plugin",
+            default = Label("//src/compiler:grpc_objective_c_plugin"),
             executable = True,
             providers = ["files_to_run"],
-            cfg = "host",
+            cfg = "exec",
         ),
         "srcs": attr.string_list(
             mandatory = False,
@@ -177,12 +177,12 @@ generate_objc = rule(
             default = False,
         ),
         "well_known_protos": attr.label(
-            default = "@com_google_protobuf//:well_known_protos",
+            default = Label("@com_google_protobuf//:well_known_type_protos"),
         ),
         "_protoc": attr.label(
-            default = Label("//external:protocol_compiler"),
+            default = Label("@com_google_protobuf//:protoc"),
             executable = True,
-            cfg = "host",
+            cfg = "exec",
         ),
     },
     output_to_genfiles = True,

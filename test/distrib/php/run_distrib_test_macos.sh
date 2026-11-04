@@ -13,13 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+PS4='+ $(date "+[%H:%M:%S %Z]")\011 '
 set -ex
 
 cd "$(dirname "$0")"
 
 cp -r "$EXTERNAL_GIT_ROOT"/input_artifacts/grpc-*.tgz .
 
-find . -regex ".*/grpc-[0-9].*.tgz" | cut -b3- | \
-    xargs sudo MAKEFLAGS=-j pecl install
+# get name of the PHP package archive to test (we don't know
+# the exact version string in advance)
+GRPC_PEAR_PACKAGE_NAME=$(find . -regex '.*/grpc-[0-9].*.tgz' | sed 's|./||')
+
+# Use -j4 since higher parallelism can lead to "resource unavailable"
+# errors during the build. See b/257261061#comment4
+sudo MAKEFLAGS=-j4 pecl install "${GRPC_PEAR_PACKAGE_NAME}"
 
 php -d extension=grpc.so -d max_execution_time=300 distribtest.php

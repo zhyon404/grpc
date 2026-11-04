@@ -16,54 +16,68 @@ load("//bazel:grpc_build_system.bzl", "grpc_cc_test", "grpc_package")
 
 licenses(["notice"])
 
-grpc_package(name = "test/core/tsi/alts/frame_protector")
+grpc_package(
+    name = "test/core/tsi/alts/frame_protector",
+    features = [
+        "layering_check",
+        "parse_headers",
+    ],
+)
 
 grpc_cc_test(
     name = "alts_counter_test",
     srcs = ["alts_counter_test.cc"],
-    language = "C++",
+    external_deps = ["gtest"],
     deps = [
         "//:gpr",
         "//:grpc",
+        "//:tsi_alts_frame_protector",
+        "//test/core/test_util:grpc_test_util",
         "//test/core/tsi/alts/crypt:alts_crypt_test_util",
-        "//test/core/util:grpc_test_util",
     ],
 )
 
 grpc_cc_test(
     name = "alts_crypter_test",
     srcs = ["alts_crypter_test.cc"],
-    language = "C++",
+    external_deps = [
+        "gtest",
+        "absl/types:span",
+    ],
     deps = [
         "//:gpr",
         "//:grpc",
+        "//:tsi_alts_frame_protector",
+        "//test/core/test_util:grpc_test_util",
         "//test/core/tsi/alts/crypt:alts_crypt_test_util",
-        "//test/core/util:grpc_test_util",
     ],
 )
 
 grpc_cc_test(
     name = "alts_frame_protector_test",
     srcs = ["alts_frame_protector_test.cc"],
-    language = "C++",
+    external_deps = ["gtest"],
     deps = [
         "//:gpr",
         "//:grpc",
+        "//:tsi_alts_frame_protector",
+        "//:tsi_base",
+        "//test/core/test_util:grpc_test_util",
         "//test/core/tsi:transport_security_test_lib",
         "//test/core/tsi/alts/crypt:alts_crypt_test_util",
-        "//test/core/util:grpc_test_util",
     ],
 )
 
 grpc_cc_test(
     name = "frame_handler_test",
     srcs = ["frame_handler_test.cc"],
-    language = "C++",
+    external_deps = ["gtest"],
     deps = [
         "//:gpr",
-        "//:gpr_base",
         "//:grpc",
+        "//:tsi_alts_frame_protector",
+        "//src/core:useful",
+        "//test/core/test_util:grpc_test_util",
         "//test/core/tsi/alts/crypt:alts_crypt_test_util",
-        "//test/core/util:grpc_test_util",
     ],
 )

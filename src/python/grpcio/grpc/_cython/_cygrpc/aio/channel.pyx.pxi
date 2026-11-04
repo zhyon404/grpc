@@ -31,9 +31,10 @@ cdef class AioChannel:
         if options is None:
             options = ()
         cdef _ChannelArgs channel_args = _ChannelArgs(options)
-        self._target = target
+        self.target = target
         self.loop = loop
         self._status = AIO_CHANNEL_STATUS_READY
+        self._registered_call_handles = {}
 
         if credentials is None:
             self._is_secure = False
@@ -44,9 +45,11 @@ cdef class AioChannel:
             grpc_channel_credentials_release(creds)
         else:
             self._is_secure = True
+            creds = <grpc_channel_credentials *> credentials.c()
             self.channel = grpc_channel_create(<char *>target,
-                <grpc_channel_credentials *> credentials.c(),
+                creds,
                 channel_args.c_args())
+            grpc_channel_credentials_release(creds)
 
     def __dealloc__(self):
         shutdown_grpc_aio()
@@ -108,11 +111,31 @@ cdef class AioChannel:
     def closed(self):
         return self._status in (AIO_CHANNEL_STATUS_CLOSING, AIO_CHANNEL_STATUS_DESTROYED)
 
+    def get_registered_call_handle(self, bytes method):
+        """
+        Get or registers a call handler for a method.
+
+        This method is not thread-safe. It is acceptable since method is only called
+        during multicallable construction, not during RPC execution. Moreover there
+        are no `await` suspension points, which can interleave.
+
+        Args:
+          method: Required, the method name for the RPC.
+
+        Returns:
+          The registered call handle pointer as a Python Long.
+        """
+        if method not in self._registered_call_handles:
+            self._registered_call_handles[method] = CallHandle(
+                cpython.PyLong_FromVoidPtr(self.channel), method)
+        return self._registered_call_handles[method].call_handle
+
     def call(self,
              bytes method,
              object deadline,
              object python_call_credentials,
-             object wait_for_ready):
+             object wait_for_ready,
+             object registered_call_handle = None):
         """Assembles a Cython Call object.
 
         Returns:
@@ -130,4 +153,4 @@ cdef class AioChannel:
         else:
             cython_call_credentials = None
 
-        return _AioCall(self, deadline, method, cython_call_credentials, wait_for_ready)
+        return _AioCall(self, deadline, method, cython_call_credentials, wait_for_ready, registered_call_handle)

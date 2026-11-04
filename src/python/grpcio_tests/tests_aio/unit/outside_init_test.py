@@ -15,19 +15,27 @@
 
 import asyncio
 import logging
+import sys
 import unittest
 
 import grpc
 from grpc.experimental import aio
+from typing_extensions import override
 
 from src.proto.grpc.testing import messages_pb2
 from src.proto.grpc.testing import test_pb2_grpc
+from tests_aio.unit import _common
 from tests_aio.unit._test_server import start_test_server
 
 _NUM_OF_LOOPS = 50
 
 
 class TestOutsideInit(unittest.TestCase):
+    @classmethod
+    @override
+    def setUpClass(cls):
+        # Logging config in setUpClass compatible with bazel-based runner.
+        _common.setup_absl_like_logging()
 
     def test_behavior_outside_asyncio(self):
         # Ensures non-AsyncIO object can be initiated
@@ -37,8 +45,8 @@ class TestOutsideInit(unittest.TestCase):
         # NOTE(lidiz) This behavior is bound with GAPIC generator, and required
         # by test frameworks like pytest. In test frameworks, objects shared
         # across cases need to be created outside of AsyncIO coroutines.
-        aio.insecure_channel('')
-        aio.secure_channel('', channel_creds)
+        aio.insecure_channel("")
+        aio.secure_channel("", channel_creds)
         aio.server()
         aio.init_grpc_aio()
         aio.shutdown_grpc_aio()
@@ -51,6 +59,8 @@ class TestOutsideInit(unittest.TestCase):
         async def ping_pong():
             address, server = await start_test_server()
             channel = aio.insecure_channel(address)
+            logging.info(f"Channel loop: {id(channel._loop)=}")
+
             stub = test_pb2_grpc.TestServiceStub(channel)
 
             await stub.UnaryCall(messages_pb2.SimpleRequest())
@@ -59,10 +69,17 @@ class TestOutsideInit(unittest.TestCase):
             await server.stop(None)
 
         for i in range(_NUM_OF_LOOPS):
-            old_loop = asyncio.get_event_loop()
-            old_loop.close()
+            # In python 3.14+, the first time we attempt getting the old loop,
+            # it won't exist: get_event_loop() now raises error when there's
+            # no running loop.
+            # TODO(sergiitk): revisit after getting rid of the loop policies.
+            if sys.version_info < (3, 14) or i > 0:
+                old_loop = asyncio.get_event_loop()
+                logging.info(f"Closing old loop: {id(old_loop)}")
+                old_loop.close()
 
             loop = asyncio.new_event_loop()
+            logging.info(f"Created new loop: {id(loop)}")
             loop.set_debug(True)
             asyncio.set_event_loop(loop)
 
@@ -72,5 +89,4 @@ class TestOutsideInit(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
     unittest.main(verbosity=2)

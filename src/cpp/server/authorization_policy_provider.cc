@@ -13,9 +13,13 @@
 // limitations under the License.
 
 #include <grpc/grpc_security.h>
+#include <grpc/status.h>
 #include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
 #include <grpcpp/security/authorization_policy_provider.h>
+#include <grpcpp/support/status.h>
+
+#include <memory>
+#include <string>
 
 namespace grpc {
 namespace experimental {

@@ -55,7 +55,7 @@ class ProtoReflectionDescriptorDatabase(DescriptorDatabase):
         self._logger = logging.getLogger(__name__)
         self._stub = ServerReflectionStub(channel)
         self._known_files: Set[str] = set()
-        self._cached_extension_numbers: Dict[str, List[int]] = dict()
+        self._cached_extension_numbers: Dict[str, List[int]] = {}
 
     def get_services(self) -> Iterable[str]:
         """
@@ -64,7 +64,6 @@ class ProtoReflectionDescriptorDatabase(DescriptorDatabase):
         Returns:
             A list of strings corresponding to the names of the services.
         """
-
         request = ServerReflectionRequest(list_services="")
         response = self._do_one_request(request, key="")
         list_services: ListServiceResponse = response.list_services_response
@@ -87,7 +86,6 @@ class ProtoReflectionDescriptorDatabase(DescriptorDatabase):
         Raises:
             KeyError: the file was not found.
         """
-
         try:
             return super().FindFileByName(name)
         except KeyError:
@@ -121,7 +119,6 @@ class ProtoReflectionDescriptorDatabase(DescriptorDatabase):
         Raises:
             KeyError: the symbol was not found.
         """
-
         try:
             return super().FindFileContainingSymbol(symbol)
         except KeyError:
@@ -148,21 +145,22 @@ class ProtoReflectionDescriptorDatabase(DescriptorDatabase):
         Raises:
             KeyError: The message type `extendee_name` was not found.
         """
-
         if extendee_name in self._cached_extension_numbers:
             return self._cached_extension_numbers[extendee_name]
         request = ServerReflectionRequest(
-            all_extension_numbers_of_type=extendee_name)
+            all_extension_numbers_of_type=extendee_name
+        )
         response = self._do_one_request(request, key=extendee_name)
         all_extension_numbers: ExtensionNumberResponse = (
-            response.all_extension_numbers_response)
+            response.all_extension_numbers_response
+        )
         numbers = list(all_extension_numbers.extension_number)
         self._cached_extension_numbers[extendee_name] = numbers
         return numbers
 
     def FindFileContainingExtension(
-            self, extendee_name: str,
-            extension_number: int) -> FileDescriptorProto:
+        self, extendee_name: str, extension_number: int
+    ) -> FileDescriptorProto:
         """
         Find the file which defines an extension for the given message type
         and field number.
@@ -180,43 +178,50 @@ class ProtoReflectionDescriptorDatabase(DescriptorDatabase):
         Raises:
             KeyError: The message or the extension number were not found.
         """
-
         try:
-            return super().FindFileContainingExtension(extendee_name,
-                                                       extension_number)
+            return super().FindFileContainingExtension(
+                extendee_name, extension_number
+            )
         except KeyError:
             pass
         request = ServerReflectionRequest(
             file_containing_extension=ExtensionRequest(
-                containing_type=extendee_name,
-                extension_number=extension_number))
-        response = self._do_one_request(request,
-                                        key=(extendee_name, extension_number))
+                containing_type=extendee_name, extension_number=extension_number
+            )
+        )
+        response = self._do_one_request(
+            request, key=(extendee_name, extension_number)
+        )
         file_desc = response.file_descriptor_response
         self._add_file_from_response(file_desc)
-        return super().FindFileContainingExtension(extendee_name,
-                                                   extension_number)
+        return super().FindFileContainingExtension(
+            extendee_name, extension_number
+        )
 
-    def _do_one_request(self, request: ServerReflectionRequest,
-                        key: Any) -> ServerReflectionResponse:
+    def _do_one_request(
+        self, request: ServerReflectionRequest, key: Any
+    ) -> ServerReflectionResponse:
         response = self._stub.ServerReflectionInfo(iter([request]))
         res = next(response)
         if res.WhichOneof("message_response") == "error_response":
             # Only NOT_FOUND errors are expected at this layer
             error_code = res.error_response.error_code
-            assert (error_code == grpc.StatusCode.NOT_FOUND.value[0]
-                   ), "unexpected error response: " + repr(res.error_response)
+            assert (
+                error_code == grpc.StatusCode.NOT_FOUND.value[0]
+            ), "unexpected error response: " + repr(res.error_response)
             raise KeyError(key)
         return res
 
     def _add_file_from_response(
-            self, file_descriptor: FileDescriptorResponse) -> None:
+        self, file_descriptor: FileDescriptorResponse
+    ) -> None:
         protos: List[bytes] = file_descriptor.file_descriptor_proto
         for proto in protos:
             desc = FileDescriptorProto()
             desc.ParseFromString(proto)
             if desc.name not in self._known_files:
-                self._logger.info("Loading descriptors from file: %s",
-                                  desc.name)
+                self._logger.info(
+                    "Loading descriptors from file: %s", desc.name
+                )
                 self._known_files.add(desc.name)
                 self.Add(desc)

@@ -17,9 +17,7 @@ gRPC Async API objects may only be used on the thread on which they were
 created. AsyncIO doesn't provide thread safety for most of its APIs.
 """
 
-from typing import Any, Optional, Sequence, Tuple
-
-import grpc
+import grpc  # pyright: ignore[reportUnusedImport]
 from grpc._cython.cygrpc import AbortError
 from grpc._cython.cygrpc import BaseError
 from grpc._cython.cygrpc import EOF
@@ -59,37 +57,38 @@ from ._typing import ChannelArgumentType
 ###################################  __all__  #################################
 
 __all__ = (
-    'init_grpc_aio',
-    'shutdown_grpc_aio',
-    'AioRpcError',
-    'RpcContext',
-    'Call',
-    'UnaryUnaryCall',
-    'UnaryStreamCall',
-    'StreamUnaryCall',
-    'StreamStreamCall',
-    'Channel',
-    'UnaryUnaryMultiCallable',
-    'UnaryStreamMultiCallable',
-    'StreamUnaryMultiCallable',
-    'StreamStreamMultiCallable',
-    'ClientCallDetails',
-    'ClientInterceptor',
-    'UnaryStreamClientInterceptor',
-    'UnaryUnaryClientInterceptor',
-    'StreamUnaryClientInterceptor',
-    'StreamStreamClientInterceptor',
-    'InterceptedUnaryUnaryCall',
-    'ServerInterceptor',
-    'insecure_channel',
-    'server',
-    'Server',
-    'ServicerContext',
-    'EOF',
-    'secure_channel',
-    'AbortError',
-    'BaseError',
-    'UsageError',
-    'InternalError',
-    'Metadata',
+    "EOF",
+    "AbortError",
+    "AioRpcError",
+    "BaseError",
+    "Call",
+    "Channel",
+    "ChannelArgumentType",
+    "ClientCallDetails",
+    "ClientInterceptor",
+    "InterceptedUnaryUnaryCall",
+    "InternalError",
+    "Metadata",
+    "RpcContext",
+    "Server",
+    "ServerInterceptor",
+    "ServicerContext",
+    "StreamStreamCall",
+    "StreamStreamClientInterceptor",
+    "StreamStreamMultiCallable",
+    "StreamUnaryCall",
+    "StreamUnaryClientInterceptor",
+    "StreamUnaryMultiCallable",
+    "UnaryStreamCall",
+    "UnaryStreamClientInterceptor",
+    "UnaryStreamMultiCallable",
+    "UnaryUnaryCall",
+    "UnaryUnaryClientInterceptor",
+    "UnaryUnaryMultiCallable",
+    "UsageError",
+    "init_grpc_aio",
+    "insecure_channel",
+    "secure_channel",
+    "server",
+    "shutdown_grpc_aio",
 )

@@ -14,23 +14,32 @@
 // limitations under the License.
 //
 
-#include "absl/container/inlined_vector.h"
-#include "absl/status/status.h"
-
+#include <grpc/credentials.h>
 #include <grpc/grpc_security.h>
+#include <grpc/status.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/string_util.h>
+#include <grpcpp/impl/sync.h>
 #include <grpcpp/security/tls_certificate_verifier.h>
+#include <grpcpp/support/status.h>
+#include <grpcpp/support/string_ref.h>
+#include <stddef.h>
+
+#include <algorithm>
+#include <functional>
+#include <map>
+#include <utility>
+#include <vector>
+
+#include "src/core/util/grpc_check.h"
 
 namespace grpc {
 namespace experimental {
 
-static internal::GrpcLibraryInitializer g_gli_initializer;
-
 TlsCustomVerificationCheckRequest::TlsCustomVerificationCheckRequest(
     grpc_tls_custom_verification_check_request* request)
     : c_request_(request) {
-  GPR_ASSERT(c_request_ != nullptr);
+  GRPC_CHECK_NE(c_request_, nullptr);
 }
 
 grpc::string_ref TlsCustomVerificationCheckRequest::target_name() const {
@@ -53,6 +62,20 @@ grpc::string_ref TlsCustomVerificationCheckRequest::peer_cert_full_chain()
 grpc::string_ref TlsCustomVerificationCheckRequest::common_name() const {
   return c_request_->peer_info.common_name != nullptr
              ? c_request_->peer_info.common_name
+             : "";
+}
+
+grpc::string_ref TlsCustomVerificationCheckRequest::verified_root_cert_subject()
+    const {
+  return c_request_->peer_info.verified_root_cert_subject != nullptr
+             ? c_request_->peer_info.verified_root_cert_subject
+             : "";
+}
+
+grpc::string_ref
+TlsCustomVerificationCheckRequest::negotiated_key_exchange_group() const {
+  return c_request_->peer_info.negotiated_key_exchange_group != nullptr
+             ? c_request_->peer_info.negotiated_key_exchange_group
              : "";
 }
 
@@ -94,9 +117,7 @@ std::vector<grpc::string_ref> TlsCustomVerificationCheckRequest::ip_names()
 }
 
 CertificateVerifier::CertificateVerifier(grpc_tls_certificate_verifier* v)
-    : verifier_(v) {
-  g_gli_initializer.summon();
-}
+    : verifier_(v) {}
 
 CertificateVerifier::~CertificateVerifier() {
   grpc_tls_certificate_verifier_release(verifier_);
@@ -105,10 +126,10 @@ CertificateVerifier::~CertificateVerifier() {
 bool CertificateVerifier::Verify(TlsCustomVerificationCheckRequest* request,
                                  std::function<void(grpc::Status)> callback,
                                  grpc::Status* sync_status) {
-  GPR_ASSERT(request != nullptr);
-  GPR_ASSERT(request->c_request() != nullptr);
+  GRPC_CHECK_NE(request, nullptr);
+  GRPC_CHECK_NE(request->c_request(), nullptr);
   {
-    internal::MutexLock lock(&mu_);
+    internal::MutexLock lock(mu_);
     request_map_.emplace(request->c_request(), std::move(callback));
   }
   grpc_status_code status_code = GRPC_STATUS_OK;
@@ -121,7 +142,7 @@ bool CertificateVerifier::Verify(TlsCustomVerificationCheckRequest* request,
       *sync_status = grpc::Status(static_cast<grpc::StatusCode>(status_code),
                                   error_details);
     }
-    internal::MutexLock lock(&mu_);
+    internal::MutexLock lock(mu_);
     request_map_.erase(request->c_request());
   }
   gpr_free(error_details);
@@ -129,8 +150,8 @@ bool CertificateVerifier::Verify(TlsCustomVerificationCheckRequest* request,
 }
 
 void CertificateVerifier::Cancel(TlsCustomVerificationCheckRequest* request) {
-  GPR_ASSERT(request != nullptr);
-  GPR_ASSERT(request->c_request() != nullptr);
+  GRPC_CHECK_NE(request, nullptr);
+  GRPC_CHECK_NE(request->c_request(), nullptr);
   grpc_tls_certificate_verifier_cancel(verifier_, request->c_request());
 }
 
@@ -140,7 +161,7 @@ void CertificateVerifier::AsyncCheckDone(
   auto* self = static_cast<CertificateVerifier*>(callback_arg);
   std::function<void(grpc::Status)> callback;
   {
-    internal::MutexLock lock(&self->mu_);
+    internal::MutexLock lock(self->mu_);
     auto it = self->request_map_.find(request);
     if (it != self->request_map_.end()) {
       callback = std::move(it->second);
@@ -174,10 +195,10 @@ int ExternalCertificateVerifier::VerifyInCoreExternalVerifier(
   auto* self = static_cast<ExternalCertificateVerifier*>(user_data);
   TlsCustomVerificationCheckRequest* cpp_request = nullptr;
   {
-    internal::MutexLock lock(&self->mu_);
+    internal::MutexLock lock(self->mu_);
     auto pair = self->request_map_.emplace(
         request, AsyncRequestState(callback, callback_arg, request));
-    GPR_ASSERT(pair.second);
+    GRPC_CHECK(pair.second);
     cpp_request = &pair.first->second.cpp_request;
   }
   grpc::Status sync_current_verifier_status;
@@ -187,7 +208,7 @@ int ExternalCertificateVerifier::VerifyInCoreExternalVerifier(
         grpc_tls_on_custom_verification_check_done_cb callback = nullptr;
         void* callback_arg = nullptr;
         {
-          internal::MutexLock lock(&self->mu_);
+          internal::MutexLock lock(self->mu_);
           auto it = self->request_map_.find(request);
           if (it != self->request_map_.end()) {
             callback = it->second.callback;
@@ -209,7 +230,7 @@ int ExternalCertificateVerifier::VerifyInCoreExternalVerifier(
       *sync_error_details =
           gpr_strdup(sync_current_verifier_status.error_message().c_str());
     }
-    internal::MutexLock lock(&self->mu_);
+    internal::MutexLock lock(self->mu_);
     self->request_map_.erase(request);
   }
   return is_done;
@@ -220,7 +241,7 @@ void ExternalCertificateVerifier::CancelInCoreExternalVerifier(
   auto* self = static_cast<ExternalCertificateVerifier*>(user_data);
   TlsCustomVerificationCheckRequest* cpp_request = nullptr;
   {
-    internal::MutexLock lock(&self->mu_);
+    internal::MutexLock lock(self->mu_);
     auto it = self->request_map_.find(request);
     if (it != self->request_map_.end()) {
       cpp_request = &it->second.cpp_request;

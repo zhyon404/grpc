@@ -14,20 +14,19 @@
 // limitations under the License.
 //
 
-#include <memory>
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <grpc/grpc.h>
 #include <grpc/grpc_security.h>
 #include <grpcpp/security/server_credentials.h>
 #include <grpcpp/security/tls_credentials_options.h>
 
+#include <memory>
+
 #include "src/cpp/client/secure_credentials.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/util/tls_test_utils.h"
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 
 namespace {
 
@@ -159,6 +158,65 @@ TEST(TlsCertificateVerifierTest,
   verifier->Verify(&cpp_request, nullptr, &sync_status);
   EXPECT_EQ(sync_status.error_code(), grpc::StatusCode::UNAUTHENTICATED);
   EXPECT_EQ(sync_status.error_message(), "Hostname Verification Check failed.");
+}
+
+TEST(TlsCertificateVerifierTest, VerifiedRootCertSubjectVerifierSucceeds) {
+  grpc_tls_custom_verification_check_request request;
+  constexpr char kExpectedSubject[] =
+      "CN=testca,O=Internet Widgits Pty Ltd,ST=Some-State,C=AU";
+  request.peer_info.verified_root_cert_subject = kExpectedSubject;
+  auto verifier =
+      ExternalCertificateVerifier::Create<VerifiedRootCertSubjectVerifier>(
+          kExpectedSubject);
+  TlsCustomVerificationCheckRequest cpp_request(&request);
+  grpc::Status sync_status;
+  bool is_sync = verifier->Verify(&cpp_request, nullptr, &sync_status);
+  EXPECT_TRUE(is_sync);
+  EXPECT_TRUE(sync_status.ok())
+      << sync_status.error_code() << " " << sync_status.error_message();
+}
+
+TEST(TlsCertificateVerifierTest, VerifiedRootCertSubjectVerifierFailsNull) {
+  grpc_tls_custom_verification_check_request request;
+  constexpr char kExpectedSubject[] =
+      "CN=testca,O=Internet Widgits Pty Ltd,ST=Some-State,C=AU";
+  request.peer_info.verified_root_cert_subject = nullptr;
+  auto verifier =
+      ExternalCertificateVerifier::Create<VerifiedRootCertSubjectVerifier>(
+          kExpectedSubject);
+  TlsCustomVerificationCheckRequest cpp_request(&request);
+  EXPECT_EQ(cpp_request.verified_root_cert_subject(), "");
+  grpc::Status sync_status;
+  verifier->Verify(&cpp_request, nullptr, &sync_status);
+  EXPECT_EQ(sync_status.error_code(), grpc::StatusCode::UNAUTHENTICATED);
+  EXPECT_EQ(sync_status.error_message(),
+            "VerifiedRootCertSubjectVerifier failed");
+}
+
+TEST(TlsCertificateVerifierTest, VerifiedRootCertSubjectVerifierFailsMismatch) {
+  grpc_tls_custom_verification_check_request request;
+  constexpr char kExpectedSubject[] =
+      "CN=testca,O=Internet Widgits Pty Ltd,ST=Some-State,C=AU";
+  request.peer_info.verified_root_cert_subject = "BAD_SUBJECT";
+  auto verifier =
+      ExternalCertificateVerifier::Create<VerifiedRootCertSubjectVerifier>(
+          kExpectedSubject);
+  TlsCustomVerificationCheckRequest cpp_request(&request);
+  grpc::Status sync_status;
+  verifier->Verify(&cpp_request, nullptr, &sync_status);
+  EXPECT_EQ(sync_status.error_code(), grpc::StatusCode::UNAUTHENTICATED);
+  EXPECT_EQ(sync_status.error_message(),
+            "VerifiedRootCertSubjectVerifier failed");
+}
+
+TEST(TlsCertificateVerifierTest, NegotiatedKeyExchangeGroupProperty) {
+  grpc_tls_custom_verification_check_request request = {};
+  constexpr char kExpectedGroup[] = "X25519";
+  request.peer_info.negotiated_key_exchange_group = kExpectedGroup;
+  TlsCustomVerificationCheckRequest cpp_request(&request);
+  EXPECT_EQ(cpp_request.negotiated_key_exchange_group(), kExpectedGroup);
+  request.peer_info.negotiated_key_exchange_group = nullptr;
+  EXPECT_EQ(cpp_request.negotiated_key_exchange_group(), "");
 }
 
 }  // namespace

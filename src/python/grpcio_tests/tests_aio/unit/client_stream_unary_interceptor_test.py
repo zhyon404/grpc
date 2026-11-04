@@ -17,7 +17,9 @@ import logging
 import unittest
 
 import grpc
+from grpc.aio._interceptor import _InterceptedStreamRequestMixin
 from grpc.experimental import aio
+import typeguard
 
 from src.proto.grpc.testing import messages_pb2
 from src.proto.grpc.testing import test_pb2_grpc
@@ -36,9 +38,9 @@ _RESPONSE_INTERVAL_US = int(_SHORT_TIMEOUT_S * 1000 * 1000)
 
 
 class _StreamUnaryInterceptorEmpty(aio.StreamUnaryClientInterceptor):
-
-    async def intercept_stream_unary(self, continuation, client_call_details,
-                                     request_iterator):
+    async def intercept_stream_unary(
+        self, continuation, client_call_details, request_iterator
+    ):
         return await continuation(client_call_details, request_iterator)
 
     def assert_in_final_state(self, test: unittest.TestCase):
@@ -46,21 +48,22 @@ class _StreamUnaryInterceptorEmpty(aio.StreamUnaryClientInterceptor):
 
 
 class _StreamUnaryInterceptorWithRequestIterator(
-        aio.StreamUnaryClientInterceptor):
-
-    async def intercept_stream_unary(self, continuation, client_call_details,
-                                     request_iterator):
+    aio.StreamUnaryClientInterceptor
+):
+    async def intercept_stream_unary(
+        self, continuation, client_call_details, request_iterator
+    ):
         self.request_iterator = CountingRequestIterator(request_iterator)
         call = await continuation(client_call_details, self.request_iterator)
         return call
 
     def assert_in_final_state(self, test: unittest.TestCase):
-        test.assertEqual(_NUM_STREAM_REQUESTS,
-                         self.request_iterator.request_cnt)
+        test.assertEqual(
+            _NUM_STREAM_REQUESTS, self.request_iterator.request_cnt
+        )
 
 
 class TestStreamUnaryClientInterceptor(AioTestBase):
-
     async def setUp(self):
         self._server_target, self._server = await start_test_server()
 
@@ -68,19 +71,23 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
         await self._server.stop(None)
 
     async def test_intercepts(self):
-        for interceptor_class in (_StreamUnaryInterceptorEmpty,
-                                  _StreamUnaryInterceptorWithRequestIterator):
-
+        for interceptor_class in (
+            _StreamUnaryInterceptorEmpty,
+            _StreamUnaryInterceptorWithRequestIterator,
+        ):
             with self.subTest(name=interceptor_class):
                 interceptor = interceptor_class()
-                channel = aio.insecure_channel(self._server_target,
-                                               interceptors=[interceptor])
+                channel = aio.insecure_channel(
+                    self._server_target, interceptors=[interceptor]
+                )
                 stub = test_pb2_grpc.TestServiceStub(channel)
 
-                payload = messages_pb2.Payload(body=b'\0' *
-                                               _REQUEST_PAYLOAD_SIZE)
+                payload = messages_pb2.Payload(
+                    body=b"\0" * _REQUEST_PAYLOAD_SIZE
+                )
                 request = messages_pb2.StreamingInputCallRequest(
-                    payload=payload)
+                    payload=payload
+                )
 
                 async def request_iterator():
                     for _ in range(_NUM_STREAM_REQUESTS):
@@ -90,13 +97,15 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
 
                 response = await call
 
-                self.assertEqual(_NUM_STREAM_REQUESTS * _REQUEST_PAYLOAD_SIZE,
-                                 response.aggregated_payload_size)
+                self.assertEqual(
+                    _NUM_STREAM_REQUESTS * _REQUEST_PAYLOAD_SIZE,
+                    response.aggregated_payload_size,
+                )
                 self.assertEqual(await call.code(), grpc.StatusCode.OK)
                 self.assertEqual(await call.initial_metadata(), aio.Metadata())
                 self.assertEqual(await call.trailing_metadata(), aio.Metadata())
-                self.assertEqual(await call.details(), '')
-                self.assertEqual(await call.debug_error_string(), '')
+                self.assertEqual(await call.details(), "")
+                self.assertEqual(await call.debug_error_string(), "")
                 self.assertEqual(call.cancel(), False)
                 self.assertEqual(call.cancelled(), False)
                 self.assertEqual(call.done(), True)
@@ -106,19 +115,23 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
                 await channel.close()
 
     async def test_intercepts_using_write(self):
-        for interceptor_class in (_StreamUnaryInterceptorEmpty,
-                                  _StreamUnaryInterceptorWithRequestIterator):
-
+        for interceptor_class in (
+            _StreamUnaryInterceptorEmpty,
+            _StreamUnaryInterceptorWithRequestIterator,
+        ):
             with self.subTest(name=interceptor_class):
                 interceptor = interceptor_class()
-                channel = aio.insecure_channel(self._server_target,
-                                               interceptors=[interceptor])
+                channel = aio.insecure_channel(
+                    self._server_target, interceptors=[interceptor]
+                )
                 stub = test_pb2_grpc.TestServiceStub(channel)
 
-                payload = messages_pb2.Payload(body=b'\0' *
-                                               _REQUEST_PAYLOAD_SIZE)
+                payload = messages_pb2.Payload(
+                    body=b"\0" * _REQUEST_PAYLOAD_SIZE
+                )
                 request = messages_pb2.StreamingInputCallRequest(
-                    payload=payload)
+                    payload=payload
+                )
 
                 call = stub.StreamingInputCall()
 
@@ -129,13 +142,15 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
 
                 response = await call
 
-                self.assertEqual(_NUM_STREAM_REQUESTS * _REQUEST_PAYLOAD_SIZE,
-                                 response.aggregated_payload_size)
+                self.assertEqual(
+                    _NUM_STREAM_REQUESTS * _REQUEST_PAYLOAD_SIZE,
+                    response.aggregated_payload_size,
+                )
                 self.assertEqual(await call.code(), grpc.StatusCode.OK)
                 self.assertEqual(await call.initial_metadata(), aio.Metadata())
                 self.assertEqual(await call.trailing_metadata(), aio.Metadata())
-                self.assertEqual(await call.details(), '')
-                self.assertEqual(await call.debug_error_string(), '')
+                self.assertEqual(await call.details(), "")
+                self.assertEqual(await call.debug_error_string(), "")
                 self.assertEqual(call.cancel(), False)
                 self.assertEqual(call.cancelled(), False)
                 self.assertEqual(call.done(), True)
@@ -145,20 +160,24 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
                 await channel.close()
 
     async def test_add_done_callback_interceptor_task_not_finished(self):
-        for interceptor_class in (_StreamUnaryInterceptorEmpty,
-                                  _StreamUnaryInterceptorWithRequestIterator):
-
+        for interceptor_class in (
+            _StreamUnaryInterceptorEmpty,
+            _StreamUnaryInterceptorWithRequestIterator,
+        ):
             with self.subTest(name=interceptor_class):
                 interceptor = interceptor_class()
 
-                channel = aio.insecure_channel(self._server_target,
-                                               interceptors=[interceptor])
+                channel = aio.insecure_channel(
+                    self._server_target, interceptors=[interceptor]
+                )
                 stub = test_pb2_grpc.TestServiceStub(channel)
 
-                payload = messages_pb2.Payload(body=b'\0' *
-                                               _REQUEST_PAYLOAD_SIZE)
+                payload = messages_pb2.Payload(
+                    body=b"\0" * _REQUEST_PAYLOAD_SIZE
+                )
                 request = messages_pb2.StreamingInputCallRequest(
-                    payload=payload)
+                    payload=payload
+                )
 
                 async def request_iterator():
                     for _ in range(_NUM_STREAM_REQUESTS):
@@ -175,20 +194,24 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
                 await channel.close()
 
     async def test_add_done_callback_interceptor_task_finished(self):
-        for interceptor_class in (_StreamUnaryInterceptorEmpty,
-                                  _StreamUnaryInterceptorWithRequestIterator):
-
+        for interceptor_class in (
+            _StreamUnaryInterceptorEmpty,
+            _StreamUnaryInterceptorWithRequestIterator,
+        ):
             with self.subTest(name=interceptor_class):
                 interceptor = interceptor_class()
 
-                channel = aio.insecure_channel(self._server_target,
-                                               interceptors=[interceptor])
+                channel = aio.insecure_channel(
+                    self._server_target, interceptors=[interceptor]
+                )
                 stub = test_pb2_grpc.TestServiceStub(channel)
 
-                payload = messages_pb2.Payload(body=b'\0' *
-                                               _REQUEST_PAYLOAD_SIZE)
+                payload = messages_pb2.Payload(
+                    body=b"\0" * _REQUEST_PAYLOAD_SIZE
+                )
                 request = messages_pb2.StreamingInputCallRequest(
-                    payload=payload)
+                    payload=payload
+                )
 
                 async def request_iterator():
                     for _ in range(_NUM_STREAM_REQUESTS):
@@ -205,20 +228,23 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
                 await channel.close()
 
     async def test_multiple_interceptors_request_iterator(self):
-        for interceptor_class in (_StreamUnaryInterceptorEmpty,
-                                  _StreamUnaryInterceptorWithRequestIterator):
-
+        for interceptor_class in (
+            _StreamUnaryInterceptorEmpty,
+            _StreamUnaryInterceptorWithRequestIterator,
+        ):
             with self.subTest(name=interceptor_class):
-
                 interceptors = [interceptor_class(), interceptor_class()]
-                channel = aio.insecure_channel(self._server_target,
-                                               interceptors=interceptors)
+                channel = aio.insecure_channel(
+                    self._server_target, interceptors=interceptors
+                )
                 stub = test_pb2_grpc.TestServiceStub(channel)
 
-                payload = messages_pb2.Payload(body=b'\0' *
-                                               _REQUEST_PAYLOAD_SIZE)
+                payload = messages_pb2.Payload(
+                    body=b"\0" * _REQUEST_PAYLOAD_SIZE
+                )
                 request = messages_pb2.StreamingInputCallRequest(
-                    payload=payload)
+                    payload=payload
+                )
 
                 async def request_iterator():
                     for _ in range(_NUM_STREAM_REQUESTS):
@@ -228,13 +254,15 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
 
                 response = await call
 
-                self.assertEqual(_NUM_STREAM_REQUESTS * _REQUEST_PAYLOAD_SIZE,
-                                 response.aggregated_payload_size)
+                self.assertEqual(
+                    _NUM_STREAM_REQUESTS * _REQUEST_PAYLOAD_SIZE,
+                    response.aggregated_payload_size,
+                )
                 self.assertEqual(await call.code(), grpc.StatusCode.OK)
                 self.assertEqual(await call.initial_metadata(), aio.Metadata())
                 self.assertEqual(await call.trailing_metadata(), aio.Metadata())
-                self.assertEqual(await call.details(), '')
-                self.assertEqual(await call.debug_error_string(), '')
+                self.assertEqual(await call.details(), "")
+                self.assertEqual(await call.debug_error_string(), "")
                 self.assertEqual(call.cancel(), False)
                 self.assertEqual(call.cancelled(), False)
                 self.assertEqual(call.done(), True)
@@ -245,18 +273,22 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
                 await channel.close()
 
     async def test_intercepts_request_iterator_rpc_error(self):
-        for interceptor_class in (_StreamUnaryInterceptorEmpty,
-                                  _StreamUnaryInterceptorWithRequestIterator):
-
+        for interceptor_class in (
+            _StreamUnaryInterceptorEmpty,
+            _StreamUnaryInterceptorWithRequestIterator,
+        ):
             with self.subTest(name=interceptor_class):
                 channel = aio.insecure_channel(
-                    UNREACHABLE_TARGET, interceptors=[interceptor_class()])
+                    UNREACHABLE_TARGET, interceptors=[interceptor_class()]
+                )
                 stub = test_pb2_grpc.TestServiceStub(channel)
 
-                payload = messages_pb2.Payload(body=b'\0' *
-                                               _REQUEST_PAYLOAD_SIZE)
+                payload = messages_pb2.Payload(
+                    body=b"\0" * _REQUEST_PAYLOAD_SIZE
+                )
                 request = messages_pb2.StreamingInputCallRequest(
-                    payload=payload)
+                    payload=payload
+                )
 
                 # When there is an error the request iterator is no longer
                 # consumed.
@@ -269,26 +301,32 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
                 with self.assertRaises(aio.AioRpcError) as exception_context:
                     await call
 
-                self.assertEqual(grpc.StatusCode.UNAVAILABLE,
-                                 exception_context.exception.code())
+                self.assertEqual(
+                    grpc.StatusCode.UNAVAILABLE,
+                    exception_context.exception.code(),
+                )
                 self.assertTrue(call.done())
                 self.assertEqual(grpc.StatusCode.UNAVAILABLE, await call.code())
 
                 await channel.close()
 
     async def test_intercepts_request_iterator_rpc_error_using_write(self):
-        for interceptor_class in (_StreamUnaryInterceptorEmpty,
-                                  _StreamUnaryInterceptorWithRequestIterator):
-
+        for interceptor_class in (
+            _StreamUnaryInterceptorEmpty,
+            _StreamUnaryInterceptorWithRequestIterator,
+        ):
             with self.subTest(name=interceptor_class):
                 channel = aio.insecure_channel(
-                    UNREACHABLE_TARGET, interceptors=[interceptor_class()])
+                    UNREACHABLE_TARGET, interceptors=[interceptor_class()]
+                )
                 stub = test_pb2_grpc.TestServiceStub(channel)
 
-                payload = messages_pb2.Payload(body=b'\0' *
-                                               _REQUEST_PAYLOAD_SIZE)
+                payload = messages_pb2.Payload(
+                    body=b"\0" * _REQUEST_PAYLOAD_SIZE
+                )
                 request = messages_pb2.StreamingInputCallRequest(
-                    payload=payload)
+                    payload=payload
+                )
 
                 call = stub.StreamingInputCall()
 
@@ -300,31 +338,32 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
                 with self.assertRaises(aio.AioRpcError) as exception_context:
                     await call
 
-                self.assertEqual(grpc.StatusCode.UNAVAILABLE,
-                                 exception_context.exception.code())
+                self.assertEqual(
+                    grpc.StatusCode.UNAVAILABLE,
+                    exception_context.exception.code(),
+                )
                 self.assertTrue(call.done())
                 self.assertEqual(grpc.StatusCode.UNAVAILABLE, await call.code())
 
                 await channel.close()
 
     async def test_cancel_before_rpc(self):
-
         interceptor_reached = asyncio.Event()
         wait_for_ever = self.loop.create_future()
 
         class Interceptor(aio.StreamUnaryClientInterceptor):
-
-            async def intercept_stream_unary(self, continuation,
-                                             client_call_details,
-                                             request_iterator):
+            async def intercept_stream_unary(
+                self, continuation, client_call_details, request_iterator
+            ):
                 interceptor_reached.set()
                 await wait_for_ever
 
-        channel = aio.insecure_channel(self._server_target,
-                                       interceptors=[Interceptor()])
+        channel = aio.insecure_channel(
+            self._server_target, interceptors=[Interceptor()]
+        )
         stub = test_pb2_grpc.TestServiceStub(channel)
 
-        payload = messages_pb2.Payload(body=b'\0' * _REQUEST_PAYLOAD_SIZE)
+        payload = messages_pb2.Payload(body=b"\0" * _REQUEST_PAYLOAD_SIZE)
         request = messages_pb2.StreamingInputCallRequest(payload=payload)
 
         call = stub.StreamingInputCall()
@@ -346,29 +385,28 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
         self.assertTrue(call.cancelled())
         self.assertTrue(call.done())
         self.assertEqual(await call.code(), grpc.StatusCode.CANCELLED)
-        self.assertEqual(await call.initial_metadata(), None)
-        self.assertEqual(await call.trailing_metadata(), None)
+        self.assertEqual(await call.initial_metadata(), aio.Metadata())
+        self.assertEqual(await call.trailing_metadata(), aio.Metadata())
         await channel.close()
 
     async def test_cancel_after_rpc(self):
-
         interceptor_reached = asyncio.Event()
         wait_for_ever = self.loop.create_future()
 
         class Interceptor(aio.StreamUnaryClientInterceptor):
-
-            async def intercept_stream_unary(self, continuation,
-                                             client_call_details,
-                                             request_iterator):
+            async def intercept_stream_unary(
+                self, continuation, client_call_details, request_iterator
+            ):
                 call = await continuation(client_call_details, request_iterator)
                 interceptor_reached.set()
                 await wait_for_ever
 
-        channel = aio.insecure_channel(self._server_target,
-                                       interceptors=[Interceptor()])
+        channel = aio.insecure_channel(
+            self._server_target, interceptors=[Interceptor()]
+        )
         stub = test_pb2_grpc.TestServiceStub(channel)
 
-        payload = messages_pb2.Payload(body=b'\0' * _REQUEST_PAYLOAD_SIZE)
+        payload = messages_pb2.Payload(body=b"\0" * _REQUEST_PAYLOAD_SIZE)
         request = messages_pb2.StreamingInputCallRequest(payload=payload)
 
         call = stub.StreamingInputCall()
@@ -390,25 +428,30 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
         self.assertTrue(call.cancelled())
         self.assertTrue(call.done())
         self.assertEqual(await call.code(), grpc.StatusCode.CANCELLED)
-        self.assertEqual(await call.initial_metadata(), None)
-        self.assertEqual(await call.trailing_metadata(), None)
+        self.assertEqual(await call.initial_metadata(), aio.Metadata())
+        self.assertEqual(await call.trailing_metadata(), aio.Metadata())
         await channel.close()
 
     async def test_cancel_while_writing(self):
-        # Test cancelation before making any write or after doing at least 1
+        # Test cancellation before making any write or after doing at least 1
         for num_writes_before_cancel in (0, 1):
-            with self.subTest(name="Num writes before cancel: {}".format(
-                    num_writes_before_cancel)):
-
+            with self.subTest(
+                name="Num writes before cancel: {}".format(
+                    num_writes_before_cancel
+                )
+            ):
                 channel = aio.insecure_channel(
                     UNREACHABLE_TARGET,
-                    interceptors=[_StreamUnaryInterceptorWithRequestIterator()])
+                    interceptors=[_StreamUnaryInterceptorWithRequestIterator()],
+                )
                 stub = test_pb2_grpc.TestServiceStub(channel)
 
-                payload = messages_pb2.Payload(body=b'\0' *
-                                               _REQUEST_PAYLOAD_SIZE)
+                payload = messages_pb2.Payload(
+                    body=b"\0" * _REQUEST_PAYLOAD_SIZE
+                )
                 request = messages_pb2.StreamingInputCallRequest(
-                    payload=payload)
+                    payload=payload
+                )
 
                 call = stub.StreamingInputCall()
 
@@ -428,21 +471,20 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
                 await channel.close()
 
     async def test_cancel_by_the_interceptor(self):
-
         class Interceptor(aio.StreamUnaryClientInterceptor):
-
-            async def intercept_stream_unary(self, continuation,
-                                             client_call_details,
-                                             request_iterator):
+            async def intercept_stream_unary(
+                self, continuation, client_call_details, request_iterator
+            ):
                 call = await continuation(client_call_details, request_iterator)
                 call.cancel()
                 return call
 
-        channel = aio.insecure_channel(UNREACHABLE_TARGET,
-                                       interceptors=[Interceptor()])
+        channel = aio.insecure_channel(
+            UNREACHABLE_TARGET, interceptors=[Interceptor()]
+        )
         stub = test_pb2_grpc.TestServiceStub(channel)
 
-        payload = messages_pb2.Payload(body=b'\0' * _REQUEST_PAYLOAD_SIZE)
+        payload = messages_pb2.Payload(body=b"\0" * _REQUEST_PAYLOAD_SIZE)
         request = messages_pb2.StreamingInputCallRequest(payload=payload)
 
         call = stub.StreamingInputCall()
@@ -461,22 +503,21 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
         await channel.close()
 
     async def test_exception_raised_by_interceptor(self):
-
         class InterceptorException(Exception):
             pass
 
         class Interceptor(aio.StreamUnaryClientInterceptor):
-
-            async def intercept_stream_unary(self, continuation,
-                                             client_call_details,
-                                             request_iterator):
+            async def intercept_stream_unary(
+                self, continuation, client_call_details, request_iterator
+            ):
                 raise InterceptorException
 
-        channel = aio.insecure_channel(UNREACHABLE_TARGET,
-                                       interceptors=[Interceptor()])
+        channel = aio.insecure_channel(
+            UNREACHABLE_TARGET, interceptors=[Interceptor()]
+        )
         stub = test_pb2_grpc.TestServiceStub(channel)
 
-        payload = messages_pb2.Payload(body=b'\0' * _REQUEST_PAYLOAD_SIZE)
+        payload = messages_pb2.Payload(body=b"\0" * _REQUEST_PAYLOAD_SIZE)
         request = messages_pb2.StreamingInputCallRequest(payload=payload)
 
         call = stub.StreamingInputCall()
@@ -492,10 +533,11 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
 
     async def test_intercepts_prohibit_mixing_style(self):
         channel = aio.insecure_channel(
-            self._server_target, interceptors=[_StreamUnaryInterceptorEmpty()])
+            self._server_target, interceptors=[_StreamUnaryInterceptorEmpty()]
+        )
         stub = test_pb2_grpc.TestServiceStub(channel)
 
-        payload = messages_pb2.Payload(body=b'\0' * _REQUEST_PAYLOAD_SIZE)
+        payload = messages_pb2.Payload(body=b"\0" * _REQUEST_PAYLOAD_SIZE)
         request = messages_pb2.StreamingInputCallRequest(payload=payload)
 
         async def request_iterator():
@@ -513,6 +555,124 @@ class TestStreamUnaryClientInterceptor(AioTestBase):
         await channel.close()
 
 
-if __name__ == '__main__':
+class TestWriteToIteratorQueueInterruptibleTaskLeak(AioTestBase):
+
+    async def test_no_put_task_leak_on_cancellation(self):
+        with typeguard.suppress_type_checks():
+            mixin = _InterceptedStreamRequestMixin()
+            mixin._loop = asyncio.get_event_loop()
+            mixin._init_stream_request_mixin(request_iterator=None)
+
+            class DummyCall:
+                def __init__(self):
+                    self.code_future = asyncio.get_event_loop().create_future()
+
+                async def code(self):
+                    return await self.code_future
+
+            call = DummyCall()
+
+            # First write fills the queue of size 1
+            await mixin._write_to_iterator_queue_interruptible(
+                "request1", call
+            )  # pytype: disable=wrong-arg-types
+
+            # Second write blocks on queue.put() because the queue is full
+            write_task = asyncio.create_task(
+                mixin._write_to_iterator_queue_interruptible(
+                    "request2", call
+                )  # pytype: disable=wrong-arg-types
+            )
+
+            # Allow write_task to start and block on put()
+            await asyncio.sleep(0.1)
+            self.assertFalse(write_task.done())
+
+            # Complete the call's code() future to unblock asyncio.wait
+            call.code_future.set_result(grpc.StatusCode.CANCELLED)
+
+            # Await write_task to complete execution
+            await write_task
+
+            # Yield control to allow event loop to process cancelled put_task
+            await asyncio.sleep(0.01)
+
+            all_tasks = asyncio.all_tasks()
+            leaked_tasks = []
+            for t in all_tasks:
+                coro = t.get_coro()
+                coro_name = str(coro) if coro else t.get_name()
+                if "Queue.put" in coro_name:
+                    leaked_tasks.append(t)
+
+            self.assertEqual(
+                0, len(leaked_tasks), f"Leaked tasks found: {leaked_tasks}"
+            )
+
+
+class _RecordingStreamUnaryInterceptor(aio.StreamUnaryClientInterceptor):
+    def __init__(self, record):
+        self.record = record
+
+    async def intercept_stream_unary(
+        self, continuation, client_call_details, request_iter
+    ):
+        method = client_call_details.method
+        if isinstance(method, bytes):
+            method = method.decode()
+        self.record.append(("stream-unary", method))
+        return await continuation(client_call_details, request_iter)
+
+
+class TestInterceptedStreamUnaryCallWithRegisteredMethods(AioTestBase):
+    _REQUEST = b"\x00\x00\x00"
+    _RESPONSE = b"\x00\x00\x00"
+    _SERVICE_NAME = "test"
+    _METHOD_NAME = "StreamUnary"
+
+    async def setUp(self):
+        self._server = aio.server()
+        self._port = self._server.add_insecure_port("[::]:0")
+        self._method_handlers = {
+            self._METHOD_NAME: grpc.stream_unary_rpc_method_handler(
+                self._stream_unary_handler
+            )
+        }
+        self._server.add_registered_method_handlers(
+            self._SERVICE_NAME, self._method_handlers
+        )
+        await self._server.start()
+
+    async def tearDown(self):
+        await self._server.stop(0)
+
+    async def _stream_unary_handler(self, request_iter, unused_context):
+        async for _ in request_iter:
+            pass
+        return self._RESPONSE
+
+    async def test_stream_unary_interceptor(self):
+        record = []
+        fully_qualified_method = f"/{self._SERVICE_NAME}/{self._METHOD_NAME}"
+
+        async with grpc.aio.insecure_channel(
+            f"localhost:{self._port}",
+            interceptors=[_RecordingStreamUnaryInterceptor(record)],
+        ) as channel:
+            multi_callable = channel.stream_unary(
+                fully_qualified_method, _registered_method=True
+            )
+            response = await multi_callable(
+                iter([self._REQUEST] * _NUM_STREAM_REQUESTS)
+            )
+
+            self.assertEqual(response, self._RESPONSE)
+            self.assertEqual(len(record), 1)
+            self.assertEqual(
+                record[0], ("stream-unary", fully_qualified_method)
+            )
+
+
+if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     unittest.main(verbosity=2)

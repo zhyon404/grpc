@@ -16,7 +16,13 @@ load("//bazel:grpc_build_system.bzl", "grpc_cc_test", "grpc_package")
 
 licenses(["notice"])
 
-grpc_package(name = "test/core/client_idle")
+grpc_package(
+    name = "test/core/client_idle",
+    features = [
+        "layering_check",
+        "parse_headers",
+    ],
+)
 
 grpc_cc_test(
     name = "idle_filter_state_test",
@@ -24,11 +30,9 @@ grpc_cc_test(
     external_deps = [
         "gtest",
     ],
-    language = "c++",
     uses_event_engine = False,
     uses_polling = False,
     deps = [
-        "//:idle_filter_state",
-        "//test/core/util:grpc_suppressions",
+        "//src/core:idle_filter_state",
     ],
 )

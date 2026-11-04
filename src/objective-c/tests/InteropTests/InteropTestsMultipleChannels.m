@@ -18,21 +18,17 @@
 
 #import <XCTest/XCTest.h>
 
-#import <Cronet/Cronet.h>
 #import <GRPCClient/GRPCCallOptions.h>
 #import <RxLibrary/GRXBufferedPipe.h>
 #import "src/objective-c/tests/RemoteTestClient/Messages.pbobjc.h"
 #import "src/objective-c/tests/RemoteTestClient/Test.pbobjc.h"
 #import "src/objective-c/tests/RemoteTestClient/Test.pbrpc.h"
 
-#import "../ConfigureCronet.h"
+#import "../Common/TestUtils.h"
 #import "InteropTestsBlockCallbacks.h"
 
 #define NSStringize_helper(x) #x
 #define NSStringize(x) @NSStringize_helper(x)
-static NSString *const kRemoteSSLHost = NSStringize(HOST_PORT_REMOTE);
-static NSString *const kLocalSSLHost = NSStringize(HOST_PORT_LOCALSSL);
-static NSString *const kLocalCleartextHost = NSStringize(HOST_PORT_LOCAL);
 
 static const NSTimeInterval TEST_TIMEOUT = 8000;
 
@@ -70,11 +66,8 @@ static const NSTimeInterval TEST_TIMEOUT = 8000;
 
 @end
 
-dispatch_once_t initCronet;
-
 @implementation InteropTestsMultipleChannels {
   RMTTestService *_remoteService;
-  RMTTestService *_remoteCronetService;
   RMTTestService *_localCleartextService;
   RMTTestService *_localSSLService;
 }
@@ -84,19 +77,18 @@ dispatch_once_t initCronet;
 
   self.continueAfterFailure = NO;
 
-  _remoteService = [RMTTestService serviceWithHost:kRemoteSSLHost callOptions:nil];
-  configureCronet(/*enable_netlog=*/false);
+  _remoteService = [RMTTestService serviceWithHost:GRPCGetRemoteInteropTestServerAddress()
+                                       callOptions:nil];
 
   // Default stack with remote host
   GRPCMutableCallOptions *options = [[GRPCMutableCallOptions alloc] init];
-  options.transportType = GRPCTransportTypeCronet;
-  // Cronet stack with remote host
-  _remoteCronetService = [RMTTestService serviceWithHost:kRemoteSSLHost callOptions:options];
 
   // Local stack with no SSL
   options = [[GRPCMutableCallOptions alloc] init];
   options.transportType = GRPCTransportTypeInsecure;
-  _localCleartextService = [RMTTestService serviceWithHost:kLocalCleartextHost callOptions:options];
+  _localCleartextService =
+      [RMTTestService serviceWithHost:GRPCGetLocalInteropTestServerAddressPlainText()
+                          callOptions:options];
 
   // Local stack with SSL
   NSBundle *bundle = [NSBundle bundleForClass:[self class]];
@@ -112,13 +104,12 @@ dispatch_once_t initCronet;
   options.transportType = GRPCTransportTypeChttp2BoringSSL;
   options.PEMRootCertificates = certs;
   options.hostNameOverride = @"foo.test.google.fr";
-  _localSSLService = [RMTTestService serviceWithHost:kLocalSSLHost callOptions:options];
+  _localSSLService = [RMTTestService serviceWithHost:GRPCGetLocalInteropTestServerAddressSSL()
+                                         callOptions:options];
 }
 
 - (void)testEmptyUnaryRPC {
   __weak XCTestExpectation *expectRemote = [self expectationWithDescription:@"Remote RPC finish"];
-  __weak XCTestExpectation *expectCronetRemote =
-      [self expectationWithDescription:@"Remote RPC finish"];
   __weak XCTestExpectation *expectCleartext =
       [self expectationWithDescription:@"Remote RPC finish"];
   __weak XCTestExpectation *expectSSL = [self expectationWithDescription:@"Remote RPC finish"];
@@ -139,18 +130,6 @@ dispatch_once_t initCronet;
                                                                  NSError *error) {
                                                    XCTAssertNil(error);
                                                    [expectRemote fulfill];
-                                                 }
-                                          writeMessageCallback:nil]
-               callOptions:nil];
-  GRPCUnaryProtoCall *callCronet = [_remoteCronetService
-      emptyCallWithMessage:request
-           responseHandler:[[InteropTestsBlockCallbacks alloc]
-                               initWithInitialMetadataCallback:nil
-                                               messageCallback:messageHandler
-                                                 closeCallback:^(NSDictionary *trailingMetadata,
-                                                                 NSError *error) {
-                                                   XCTAssertNil(error);
-                                                   [expectCronetRemote fulfill];
                                                  }
                                           writeMessageCallback:nil]
                callOptions:nil];
@@ -179,7 +158,6 @@ dispatch_once_t initCronet;
                                           writeMessageCallback:nil]
                callOptions:nil];
   [callRemote start];
-  [callCronet start];
   [callCleartext start];
   [callSSL start];
 
@@ -188,8 +166,6 @@ dispatch_once_t initCronet;
 
 - (void)testFullDuplexRPC {
   __weak XCTestExpectation *expectRemote = [self expectationWithDescription:@"Remote RPC finish"];
-  __weak XCTestExpectation *expectCronetRemote =
-      [self expectationWithDescription:@"Remote RPC finish"];
   __weak XCTestExpectation *expectCleartext =
       [self expectationWithDescription:@"Remote RPC finish"];
   __weak XCTestExpectation *expectSSL = [self expectationWithDescription:@"Remote RPC finish"];
@@ -237,19 +213,6 @@ dispatch_once_t initCronet;
                                                             NSError *error) {
                                               XCTAssertNil(error);
                                               [expectRemote fulfill];
-                                            }
-                                            writeMessageCallback:nil]
-                            callOptions:nil];
-  calls[1] = [_remoteCronetService
-      fullDuplexCallWithResponseHandler:[[InteropTestsBlockCallbacks alloc]
-                                            initWithInitialMetadataCallback:nil
-                                            messageCallback:^(id message) {
-                                              handler(1, message);
-                                            }
-                                            closeCallback:^(NSDictionary *trailingMetadata,
-                                                            NSError *error) {
-                                              XCTAssertNil(error);
-                                              [expectCronetRemote fulfill];
                                             }
                                             writeMessageCallback:nil]
                             callOptions:nil];

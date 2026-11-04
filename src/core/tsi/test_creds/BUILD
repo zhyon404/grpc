@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+package(features = [
+    "layering_check",
+    "parse_headers",
+])
+
 licenses(["notice"])
 
 exports_files([
@@ -22,10 +27,24 @@ exports_files([
     "server0.pem",
     "client.key",
     "client.pem",
+    "client1.key",
+    "client1.pem",
+    "client-with-spiffe.key",
+    "client-with-spiffe.pem",
     "badserver.key",
     "badserver.pem",
     "badclient.key",
     "badclient.pem",
     "multi-domain.key",
     "multi-domain.pem",
+    "leaf_signed_by_intermediate.key",
+    "leaf_and_intermediate_chain.pem",
+    "malformed-cert.pem",
+    "malformed-key.pem",
+    "sni1.key",
+    "sni1.pem",
+    "sni2.key",
+    "sni2.pem",
+    "sni3.key",
+    "sni3.pem",
 ])

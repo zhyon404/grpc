@@ -1,20 +1,20 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 /// CFStream is build-enabled on iOS by default and disabled by default on other
 /// platforms (see port_platform.h). To enable CFStream build on another
@@ -40,8 +40,6 @@
 #include "src/core/lib/iomgr/ev_apple.h"
 #include "src/core/lib/iomgr/ev_posix.h"
 #include "src/core/lib/iomgr/iomgr_internal.h"
-#include "src/core/lib/iomgr/resolve_address.h"
-#include "src/core/lib/iomgr/resolve_address_posix.h"
 #include "src/core/lib/iomgr/tcp_client.h"
 #include "src/core/lib/iomgr/tcp_posix.h"
 #include "src/core/lib/iomgr/tcp_server.h"
@@ -72,7 +70,7 @@ static bool apple_iomgr_platform_is_any_background_poller_thread(void) {
 }
 
 static bool apple_iomgr_platform_add_closure_to_background_poller(
-    grpc_closure* closure, grpc_error_handle error) {
+    grpc_closure* /*closure*/, grpc_error_handle /*error*/) {
   return false;
 }
 
@@ -177,11 +175,14 @@ void grpc_set_default_iomgr_platform() {
     grpc_set_pollset_set_vtable(&grpc_apple_pollset_set_vtable);
     grpc_set_iomgr_platform_vtable(&apple_vtable);
   }
+  grpc_tcp_client_global_init();
   grpc_set_timer_impl(&grpc_generic_timer_vtable);
-  grpc_core::SetDNSResolver(grpc_core::NativeDNSResolver::GetOrCreate());
 }
 
 bool grpc_iomgr_run_in_background() {
+  if (grpc_core::IsEventEngineCallbackCqEnabled()) {
+    return true;
+  }
   char* enable_cfstream_str = getenv(grpc_cfstream_env_var);
   bool enable_cfstream =
       enable_cfstream_str == nullptr || enable_cfstream_str[0] != '0';
@@ -197,4 +198,4 @@ bool grpc_iomgr_run_in_background() {
   }
 }
 
-#endif /* GRPC_CFSTREAM_IOMGR */
+#endif  // GRPC_CFSTREAM_IOMGR

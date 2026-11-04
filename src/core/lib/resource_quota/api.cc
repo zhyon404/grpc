@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/lib/resource_quota/api.h"
 
+#include <grpc/grpc.h>
+#include <grpc/impl/channel_arg_names.h>
+#include <grpc/support/port_platform.h>
 #include <stdint.h>
 
 #include <atomic>
@@ -23,17 +24,13 @@
 #include <string>
 #include <utility>
 
-#include "absl/strings/str_cat.h"
-
-#include <grpc/grpc.h>
-
 #include "src/core/lib/channel/channel_args.h"
-#include "src/core/lib/channel/channel_args_preconditioning.h"
-#include "src/core/lib/gprpp/ref_counted_ptr.h"
 #include "src/core/lib/iomgr/exec_ctx.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/resource_quota/resource_quota.h"
 #include "src/core/lib/resource_quota/thread_quota.h"
+#include "src/core/util/ref_counted_ptr.h"
+#include "absl/strings/str_cat.h"
 
 namespace grpc_core {
 
@@ -44,7 +41,16 @@ ResourceQuotaRefPtr ResourceQuotaFromChannelArgs(
       ->Ref();
 }
 
-ChannelArgs EnsureResourceQuotaInChannelArgs(ChannelArgs args) {
+ResourceQuotaRefPtr ResourceQuotaFromEndpointConfig(
+    const grpc_event_engine::experimental::EndpointConfig& config) {
+  void* value = config.GetVoidPointer(GRPC_ARG_RESOURCE_QUOTA);
+  if (value != nullptr) {
+    return reinterpret_cast<ResourceQuota*>(value)->Ref();
+  }
+  return nullptr;
+}
+
+ChannelArgs EnsureResourceQuotaInChannelArgs(const ChannelArgs& args) {
   if (args.GetObject<ResourceQuota>() != nullptr) return args;
   // If there's no existing quota, add it to the default one - shared between
   // all channel args declared thusly. This prevents us from accidentally not
@@ -93,4 +99,11 @@ extern "C" void grpc_resource_quota_set_max_threads(
   grpc_core::ResourceQuota::FromC(resource_quota)
       ->thread_quota()
       ->SetMax(new_max_threads);
+}
+
+extern "C" void grpc_resource_quota_set_max_outstanding_streams(
+    grpc_resource_quota* resource_quota, int new_max_outstanding_streams) {
+  grpc_core::ResourceQuota::FromC(resource_quota)
+      ->stream_quota()
+      ->SetMaxOutstandingStreams(new_max_outstanding_streams);
 }

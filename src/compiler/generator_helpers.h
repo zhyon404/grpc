@@ -26,13 +26,22 @@
 #include <vector>
 
 #include "src/compiler/config.h"
+#include "src/compiler/proto_parser_helper.h"
 
 namespace grpc_generator {
+
+inline std::string ToLower(std::string s) {
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return s;
+}
 
 inline bool StripSuffix(std::string* filename, const std::string& suffix) {
   if (filename->length() >= suffix.length()) {
     size_t suffix_pos = filename->length() - suffix.length();
-    if (filename->compare(suffix_pos, std::string::npos, suffix) == 0) {
+    std::string filename_suffix = filename->substr(suffix_pos);
+
+    if (ToLower(filename_suffix) == ToLower(suffix)) {
       filename->resize(filename->size() - suffix.size());
       return true;
     }
@@ -126,7 +135,8 @@ inline std::string LowerUnderscoreToUpperCamel(std::string str) {
 
 inline std::string FileNameInUpperCamel(
     const grpc::protobuf::FileDescriptor* file, bool include_package_path) {
-  std::vector<std::string> tokens = tokenize(StripProto(file->name()), "/");
+  std::vector<std::string> tokens =
+      tokenize(StripProto(std::string(file->name())), "/");
   std::string result = "";
   if (include_package_path) {
     for (unsigned int i = 0; i < tokens.size() - 1; i++) {
@@ -245,9 +255,9 @@ inline std::string GenerateCommentsWithPrefix(
     if (elem.empty()) {
       oss << prefix << "\n";
     } else if (elem[0] == ' ') {
-      oss << prefix << elem << "\n";
+      oss << prefix << EscapeVariableDelimiters(elem) << "\n";
     } else {
-      oss << prefix << " " << elem << "\n";
+      oss << prefix << " " << EscapeVariableDelimiters(elem) << "\n";
     }
   }
   return oss.str();

@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Provides distutils command classes for the GRPC Python setup process."""
+"""Provides setuptools command classes for the GRPC Python setup process."""
 
 import os
 import shutil
@@ -19,16 +19,17 @@ import shutil
 import setuptools
 
 ROOT_DIR = os.path.abspath(os.path.dirname(os.path.abspath(__file__)))
-STATUS_PROTO = os.path.join(
-    ROOT_DIR, '../../../third_party/googleapis/google/rpc/status.proto')
-PACKAGE_STATUS_PROTO_PATH = 'grpc_status/google/rpc'
-LICENSE = os.path.join(ROOT_DIR, '../../../LICENSE')
+GRPC_ROOT_ABS_PATH = os.path.join(ROOT_DIR, "../../..")
+ROOT_REL_DIR = os.path.relpath(ROOT_DIR, start=GRPC_ROOT_ABS_PATH)
+STATUS_PROTO = "third_party/googleapis/google/rpc/status.proto"
+PACKAGE_STATUS_PROTO_DIR = "grpc_status/google/rpc"
+LICENSE = "./LICENSE"
 
 
 class Preprocess(setuptools.Command):
     """Command to copy LICENSE from root directory."""
 
-    description = ''
+    description = ""
     user_options = []
 
     def initialize_options(self):
@@ -38,12 +39,16 @@ class Preprocess(setuptools.Command):
         pass
 
     def run(self):
+        package_status_proto_rel_path = os.path.join(
+            ROOT_REL_DIR, PACKAGE_STATUS_PROTO_DIR
+        )
+
         if os.path.isfile(STATUS_PROTO):
-            if not os.path.isdir(PACKAGE_STATUS_PROTO_PATH):
-                os.makedirs(PACKAGE_STATUS_PROTO_PATH)
+            if not os.path.isdir(package_status_proto_rel_path):
+                os.makedirs(package_status_proto_rel_path)
             shutil.copyfile(
                 STATUS_PROTO,
-                os.path.join(ROOT_DIR, PACKAGE_STATUS_PROTO_PATH,
-                             'status.proto'))
+                os.path.join(package_status_proto_rel_path, "status.proto"),
+            )
         if os.path.isfile(LICENSE):
-            shutil.copyfile(LICENSE, os.path.join(ROOT_DIR, 'LICENSE'))
+            shutil.copyfile(LICENSE, os.path.join(ROOT_REL_DIR, "LICENSE"))

@@ -16,7 +16,13 @@ load("//bazel:grpc_build_system.bzl", "grpc_cc_test", "grpc_package")
 
 licenses(["notice"])
 
-grpc_package(name = "test/cpp/common")
+grpc_package(
+    name = "test/cpp/common",
+    features = [
+        "layering_check",
+        "parse_headers",
+    ],
+)
 
 grpc_cc_test(
     name = "alarm_test",
@@ -27,7 +33,9 @@ grpc_cc_test(
     tags = ["no_windows"],  # TODO(jtattermusch): fix test on windows RBE
     deps = [
         "//:grpc++_unsecure",
-        "//test/core/util:grpc_test_util_unsecure",
+        "//src/core:notification",
+        "//test/core/test_util:grpc_test_util_base",
+        "//test/core/test_util:grpc_test_util_unsecure",
     ],
 )
 
@@ -35,11 +43,23 @@ grpc_cc_test(
     name = "timer_test",
     srcs = ["timer_test.cc"],
     external_deps = [
+        "absl/log:check",
         "gtest",
+        "absl/log",
     ],
+    flaky = True,
     deps = [
+        "//:exec_ctx",
+        "//:gpr",
+        "//:grpc",
         "//:grpc++",
-        "//test/core/util:grpc_test_util",
+        "//:iomgr",
+        "//:iomgr_timer",
+        "//src/core:closure",
+        "//src/core:error",
+        "//src/core:grpc_check",
+        "//src/core:time",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -47,6 +67,7 @@ grpc_cc_test(
     name = "time_jump_test",
     srcs = ["time_jump_test.cc"],
     external_deps = [
+        "absl/log:check",
         "gtest",
     ],
     tags = [
@@ -59,7 +80,8 @@ grpc_cc_test(
     ],
     deps = [
         "//:grpc++",
-        "//test/core/util:grpc_test_util",
+        "//src/core:closure",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -72,8 +94,13 @@ grpc_cc_test(
     uses_event_engine = False,
     uses_polling = False,
     deps = [
+        "//:grpc",
         "//:grpc++",
-        "//test/core/util:grpc_test_util",
+        "//:grpc++_base",
+        "//:grpc_base",
+        "//:grpc_security_base",
+        "//:transport_auth_context",
+        "//test/core/test_util:grpc_test_util",
         "//test/cpp/util:test_util",
     ],
 )
@@ -87,22 +114,15 @@ grpc_cc_test(
     uses_event_engine = False,
     uses_polling = False,
     deps = [
+        "//:channel_arg_names",
+        "//:event_engine_base_hdrs",
+        "//:exec_ctx",
+        "//:grpc",
         "//:grpc++",
-        "//test/core/util:grpc_test_util",
-    ],
-)
-
-grpc_cc_test(
-    name = "channel_filter_test",
-    srcs = ["channel_filter_test.cc"],
-    external_deps = [
-        "gtest",
-    ],
-    uses_event_engine = False,
-    uses_polling = False,
-    deps = [
-        "//:grpc++",
-        "//test/core/util:grpc_test_util",
+        "//src/core:channel_args",
+        "//src/core:socket_mutator",
+        "//src/core:useful",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -113,8 +133,12 @@ grpc_cc_test(
         "gtest",
     ],
     deps = [
+        "//:grpc",
         "//:grpc++",
-        "//test/core/util:grpc_test_util",
+        "//:grpc++_base",
+        "//:grpc_security_base",
+        "//:transport_auth_context",
+        "//test/core/test_util:grpc_test_util",
         "//test/cpp/util:test_util",
     ],
 )
@@ -122,12 +146,34 @@ grpc_cc_test(
 grpc_cc_test(
     name = "alts_util_test",
     srcs = ["alts_util_test.cc"],
+    external_deps = ["gtest"],
+    deps = [
+        "//:alts_upb",
+        "//:grpc++",
+        "//:grpc++_alts",
+        "//:grpc++_base",
+        "//:tsi_alts_credentials",
+        "//test/core/test_util:grpc_test_util",
+        "//test/cpp/util:test_util",
+        "@com_google_protobuf//upb/mem",
+    ],
+)
+
+grpc_cc_test(
+    name = "status_test",
+    srcs = ["status_test.cc"],
     external_deps = [
         "gtest",
+        "absl/status",
+        "absl/strings",
+        "absl/strings:cord",
     ],
     deps = [
-        "//:grpc++_alts",
-        "//test/core/util:grpc_test_util",
-        "//test/cpp/util:test_util",
+        "//:config_vars",
+        "//:grpcpp_status",
+        "//src/core:experiments",
+        "//test/core/test_util:grpc_test_util",
+        "@com_google_googleapis//google/rpc:status_cc_proto",
+        "@com_google_protobuf//:any_cc_proto",
     ],
 )

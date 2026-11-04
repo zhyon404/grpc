@@ -1,31 +1,35 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
-#include <gtest/gtest.h>
-
+#include <grpc/event_engine/event_engine.h>
 #include <grpc/grpc.h>
+#include <grpc/impl/channel_arg_names.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/support/channel_arguments.h>
 
-#include "src/core/lib/gpr/useful.h"
+#include <memory>
+
+#include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/iomgr/exec_ctx.h"
-#include "src/core/lib/iomgr/socket_mutator.h"
-#include "test/core/util/test_config.h"
+#include "src/core/net/socket_mutator.h"
+#include "src/core/util/useful.h"
+#include "test/core/test_util/test_config.h"
+#include "gtest/gtest.h"
 
 namespace grpc {
 namespace testing {
@@ -86,9 +90,9 @@ class ChannelArgumentsTest : public ::testing::Test {
     channel_args.SetChannelArgs(args);
   }
 
-  static void SetUpTestCase() { grpc_init(); }
+  static void SetUpTestSuite() { grpc_init(); }
 
-  static void TearDownTestCase() { grpc_shutdown(); }
+  static void TearDownTestSuite() { grpc_shutdown(); }
 
   std::string GetDefaultUserAgentPrefix() {
     std::ostringstream user_agent_prefix;
@@ -99,7 +103,7 @@ class ChannelArgumentsTest : public ::testing::Test {
   void VerifyDefaultChannelArgs() {
     grpc_channel_args args;
     SetChannelArgs(channel_args_, &args);
-    EXPECT_EQ(static_cast<size_t>(1), args.num_args);
+    EXPECT_EQ(1, args.num_args);
     EXPECT_STREQ(GRPC_ARG_PRIMARY_USER_AGENT_STRING, args.args[0].key);
     EXPECT_EQ(GetDefaultUserAgentPrefix(),
               std::string(args.args[0].value.string));
@@ -253,6 +257,43 @@ TEST_F(ChannelArgumentsTest, SetUserAgentPrefix) {
   EXPECT_TRUE(found);
 }
 
+TEST_F(ChannelArgumentsTest, SetEventEngine) {
+  VerifyDefaultChannelArgs();
+  std::shared_ptr<grpc_event_engine::experimental::EventEngine> engine;
+
+  channel_args_.SetPointerWithVtable(
+      GRPC_ARG_EVENT_ENGINE, &engine,
+      grpc_event_engine::experimental::grpc_event_engine_arg_vtable());
+
+  grpc_channel_args args;
+  channel_args_.SetChannelArgs(&args);
+
+  grpc_core::ChannelArgs channel_args = grpc_core::ChannelArgs::FromC(args);
+
+  EXPECT_TRUE(
+      channel_args
+          .ContainsObject<grpc_event_engine::experimental::EventEngine>());
+}
+
+TEST_F(ChannelArgumentsTest, SetChildChannelArgs) {
+  VerifyDefaultChannelArgs();
+  ChannelArguments child_args;
+  child_args.SetInt("child_key", 42);
+  channel_args_.SetChildChannelArgs(child_args);
+  grpc_channel_args args;
+  channel_args_.SetChannelArgs(&args);
+  // Verify that child channel args pointer exists in parent args.
+  const grpc_channel_args* extracted_child_args =
+      grpc_channel_args_find_pointer<grpc_channel_args>(
+          &args, GRPC_ARG_CHILD_CHANNEL_ARGS);
+  ASSERT_NE(extracted_child_args, nullptr);
+  // The number of args should be 2, since GRPC_ARG_PRIMARY_USER_AGENT_STRING is
+  // added automatically.
+  EXPECT_EQ(extracted_child_args->num_args, 2);
+  EXPECT_EQ(grpc_channel_args_find_integer(extracted_child_args, "child_key",
+                                           {-1, 0, INT32_MAX}),
+            42);
+}
 }  // namespace testing
 }  // namespace grpc
 

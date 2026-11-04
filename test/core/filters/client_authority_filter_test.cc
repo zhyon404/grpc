@@ -14,109 +14,78 @@
 
 #include "src/core/ext/filters/http/client_authority_filter.h"
 
-#include <gtest/gtest.h>
+#include <grpc/impl/channel_arg_names.h>
+#include <grpc/status.h>
 
-#include "src/core/lib/resource_quota/resource_quota.h"
-#include "test/core/promise/test_context.h"
+#include "src/core/call/metadata.h"
+#include "src/core/lib/channel/channel_args.h"
+#include "test/core/filters/filter_matchers.h"
+#include "test/core/filters/filter_test.h"
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+#include "absl/status/status.h"
+#include "absl/strings/string_view.h"
 
 namespace grpc_core {
-namespace {
 
-auto* g_memory_allocator = new MemoryAllocator(
-    ResourceQuota::Default()->memory_quota()->CreateMemoryAllocator("test"));
+class ClientAuthorityFilterTest : public FilterTest {
+ protected:
+  using FilterTest::FilterTest;
 
-ChannelArgs TestChannelArgs(absl::string_view default_authority) {
-  return ChannelArgs().Set(GRPC_ARG_DEFAULT_AUTHORITY, default_authority);
+  absl::Status InitWithDefaultAuthority(absl::string_view default_authority) {
+    return CreateFilterChain<ClientAuthorityFilter>(
+        ChannelArgs().Set(GRPC_ARG_DEFAULT_AUTHORITY, default_authority));
+  }
+};
+
+// Without GRPC_ARG_DEFAULT_AUTHORITY the filter cannot be constructed; the
+// failure surfaces as a non-OK status from CreateFilterChain().
+FILTER_TEST(ClientAuthorityFilterTest, DefaultFails) {
+  EXPECT_FALSE(CreateFilterChain<ClientAuthorityFilter>().ok());
 }
 
-TEST(ClientAuthorityFilterTest, DefaultFails) {
-  EXPECT_FALSE(
-      ClientAuthorityFilter::Create(ChannelArgs(), ChannelFilter::Args()).ok());
+FILTER_TEST(ClientAuthorityFilterTest, WithArgSucceeds) {
+  EXPECT_EQ(InitWithDefaultAuthority("foo.test.google.au"), absl::OkStatus());
 }
 
-TEST(ClientAuthorityFilterTest, WithArgSucceeds) {
-  EXPECT_EQ(ClientAuthorityFilter::Create(TestChannelArgs("foo.test.google.au"),
-                                          ChannelFilter::Args())
-                .status(),
-            absl::OkStatus());
-}
-
-TEST(ClientAuthorityFilterTest, NonStringArgFails) {
-  EXPECT_FALSE(ClientAuthorityFilter::Create(
-                   ChannelArgs().Set(GRPC_ARG_DEFAULT_AUTHORITY, 123),
-                   ChannelFilter::Args())
+// The authority arg must be a string: an int-valued arg fails construction.
+FILTER_TEST(ClientAuthorityFilterTest, NonStringArgFails) {
+  EXPECT_FALSE(CreateFilterChain<ClientAuthorityFilter>(
+                   ChannelArgs().Set(GRPC_ARG_DEFAULT_AUTHORITY, 123))
                    .ok());
 }
 
-TEST(ClientAuthorityFilterTest, PromiseCompletesImmediatelyAndSetsAuthority) {
-  auto filter = *ClientAuthorityFilter::Create(
-      TestChannelArgs("foo.test.google.au"), ChannelFilter::Args());
-  auto arena = MakeScopedArena(1024, g_memory_allocator);
-  grpc_metadata_batch initial_metadata_batch(arena.get());
-  grpc_metadata_batch trailing_metadata_batch(arena.get());
-  bool seen = false;
-  // TODO(ctiller): use Activity here, once it's ready.
-  TestContext<Arena> context(arena.get());
-  auto promise = filter.MakeCallPromise(
-      CallArgs{
-          ClientMetadataHandle::TestOnlyWrap(&initial_metadata_batch),
-          nullptr,
-      },
-      [&](CallArgs call_args) {
-        EXPECT_EQ(call_args.client_initial_metadata
-                      ->get_pointer(HttpAuthorityMetadata())
-                      ->as_string_view(),
-                  "foo.test.google.au");
-        seen = true;
-        return ArenaPromise<ServerMetadataHandle>(
-            [&]() -> Poll<ServerMetadataHandle> {
-              return ServerMetadataHandle::TestOnlyWrap(
-                  &trailing_metadata_batch);
-            });
-      });
-  auto result = promise();
-  EXPECT_TRUE(absl::get_if<ServerMetadataHandle>(&result) != nullptr);
-  EXPECT_TRUE(seen);
+// When the client omits :authority, the filter fills it in from the channel
+// arg, and the metadata seen at the server carries it.
+FILTER_TEST(ClientAuthorityFilterTest, SetsAuthority) {
+  ASSERT_TRUE(InitWithDefaultAuthority("foo.test.google.au").ok());
+  StartCallForFilter(NewClientMetadata());
+
+  ValueOrFailure<ClientMetadataHandle> client_initial_metadata =
+      PullClientInitialMetadata();
+  ASSERT_TRUE(client_initial_metadata.ok());
+  EXPECT_THAT(**client_initial_metadata,
+              HasMetadataKeyValue(":authority", "foo.test.google.au"));
+
+  PushServerTrailingMetadata(ServerMetadataFromStatus(GRPC_STATUS_OK));
+  EXPECT_TRUE(PullServerTrailingStatus().ok());
+  WaitForAllPendingWork();
 }
 
-TEST(ClientAuthorityFilterTest,
-     PromiseCompletesImmediatelyAndDoesNotClobberAlreadySetsAuthority) {
-  auto filter = *ClientAuthorityFilter::Create(
-      TestChannelArgs("foo.test.google.au"), ChannelFilter::Args());
-  auto arena = MakeScopedArena(1024, g_memory_allocator);
-  grpc_metadata_batch initial_metadata_batch(arena.get());
-  grpc_metadata_batch trailing_metadata_batch(arena.get());
-  initial_metadata_batch.Set(HttpAuthorityMetadata(),
-                             Slice::FromStaticString("bar.test.google.au"));
-  bool seen = false;
-  // TODO(ctiller): use Activity here, once it's ready.
-  TestContext<Arena> context(arena.get());
-  auto promise = filter.MakeCallPromise(
-      CallArgs{
-          ClientMetadataHandle::TestOnlyWrap(&initial_metadata_batch),
-          nullptr,
-      },
-      [&](CallArgs call_args) {
-        EXPECT_EQ(call_args.client_initial_metadata
-                      ->get_pointer(HttpAuthorityMetadata())
-                      ->as_string_view(),
-                  "bar.test.google.au");
-        seen = true;
-        return ArenaPromise<ServerMetadataHandle>(
-            [&]() -> Poll<ServerMetadataHandle> {
-              return ServerMetadataHandle::TestOnlyWrap(
-                  &trailing_metadata_batch);
-            });
-      });
-  auto result = promise();
-  EXPECT_TRUE(absl::get_if<ServerMetadataHandle>(&result) != nullptr);
-  EXPECT_TRUE(seen);
+// When the client already set :authority, the filter must not override it.
+FILTER_TEST(ClientAuthorityFilterTest, DoesNotOverrideAuthority) {
+  ASSERT_TRUE(InitWithDefaultAuthority("foo.test.google.au").ok());
+  StartCallForFilter(NewClientMetadata({{":authority", "bar.test.google.au"}}));
+
+  ValueOrFailure<ClientMetadataHandle> client_initial_metadata =
+      PullClientInitialMetadata();
+  ASSERT_TRUE(client_initial_metadata.ok());
+  EXPECT_THAT(**client_initial_metadata,
+              HasMetadataKeyValue(":authority", "bar.test.google.au"));
+
+  PushServerTrailingMetadata(ServerMetadataFromStatus(GRPC_STATUS_OK));
+  EXPECT_TRUE(PullServerTrailingStatus().ok());
+  WaitForAllPendingWork();
 }
 
-}  // namespace
 }  // namespace grpc_core
-
-int main(int argc, char** argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
-}

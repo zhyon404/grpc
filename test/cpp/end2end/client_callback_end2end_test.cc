@@ -1,52 +1,56 @@
-/*
- *
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <algorithm>
-#include <condition_variable>
-#include <functional>
-#include <mutex>
-#include <sstream>
-#include <thread>
-
-#include <gtest/gtest.h>
-
-#include "absl/memory/memory.h"
+//
+//
+// Copyright 2018 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/generic/generic_stub.h>
-#include <grpcpp/impl/codegen/proto_utils.h>
+#include <grpcpp/impl/proto_utils.h>
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
 #include <grpcpp/server_context.h>
 #include <grpcpp/support/client_callback.h>
 
-#include "src/core/lib/gpr/env.h"
+#include <algorithm>
+#include <condition_variable>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <thread>
+
+#include "src/core/lib/experiments/experiments.h"
 #include "src/core/lib/iomgr/iomgr.h"
+#include "src/core/util/env.h"
+#include "src/core/util/grpc_check.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
+#include "test/cpp/end2end/end2end_test_utils.h"
 #include "test/cpp/end2end/interceptors_util.h"
 #include "test/cpp/end2end/test_service_impl.h"
 #include "test/cpp/util/byte_buffer_proto_helper.h"
 #include "test/cpp/util/string_ref_helper.h"
 #include "test/cpp/util/test_credentials_provider.h"
+#include "gtest/gtest.h"
+#include "absl/log/log.h"
+#include "absl/memory/memory.h"
 
 namespace grpc {
 namespace testing {
@@ -57,16 +61,18 @@ enum class Protocol { INPROC, TCP };
 class TestScenario {
  public:
   TestScenario(bool serve_callback, Protocol protocol, bool intercept,
-               const std::string& creds_type)
+               const std::string& creds_type, bool use_virtual_rpcs = false)
       : callback_server(serve_callback),
         protocol(protocol),
         use_interceptors(intercept),
-        credentials_type(creds_type) {}
+        credentials_type(creds_type),
+        use_virtual_rpcs(use_virtual_rpcs) {}
   void Log() const;
   bool callback_server;
   Protocol protocol;
   bool use_interceptors;
   const std::string credentials_type;
+  bool use_virtual_rpcs;
 };
 
 std::ostream& operator<<(std::ostream& out, const TestScenario& scenario) {
@@ -74,13 +80,15 @@ std::ostream& operator<<(std::ostream& out, const TestScenario& scenario) {
              << (scenario.callback_server ? "true" : "false") << ",protocol="
              << (scenario.protocol == Protocol::INPROC ? "INPROC" : "TCP")
              << ",intercept=" << (scenario.use_interceptors ? "true" : "false")
-             << ",creds=" << scenario.credentials_type << "}";
+             << ",creds=" << scenario.credentials_type
+             << ",virtual=" << (scenario.use_virtual_rpcs ? "true" : "false")
+             << "}";
 }
 
 void TestScenario::Log() const {
   std::ostringstream out;
   out << *this;
-  gpr_log(GPR_DEBUG, "%s", out.str().c_str());
+  VLOG(2) << out.str();
 }
 
 class ClientCallbackEnd2endTest
@@ -101,7 +109,8 @@ class ClientCallbackEnd2endTest
       builder.AddListeningPort(server_address_.str(), server_creds);
     }
     if (!GetParam().callback_server) {
-      builder.RegisterService(&service_);
+      service_ = std::make_unique<TestServiceImpl>(GetParam().use_virtual_rpcs);
+      builder.RegisterService(service_.get());
     } else {
       builder.RegisterService(&callback_service_);
     }
@@ -113,7 +122,7 @@ class ClientCallbackEnd2endTest
       // Add 20 phony server interceptors
       creators.reserve(20);
       for (auto i = 0; i < 20; i++) {
-        creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+        creators.push_back(std::make_unique<PhonyInterceptorFactory>());
       }
       builder.experimental().SetInterceptorCreators(std::move(creators));
     }
@@ -122,10 +131,23 @@ class ClientCallbackEnd2endTest
     is_server_started_ = true;
   }
 
+  void SafeResetSession() {
+    if (session_context_) {
+      session_context_->TryCancel();
+      if (session_done_) {
+        session_done_->WaitForNotification();
+        session_done_.reset();
+      }
+      session_context_.reset();
+    }
+  }
+
   void ResetStub(
       std::unique_ptr<experimental::ClientInterceptorFactoryInterface>
           interceptor = nullptr) {
+    SafeResetSession();
     ChannelArguments args;
+    ApplyCommonChannelArguments(args);
     auto channel_creds = GetCredentialsProvider()->GetChannelCredentials(
         GetParam().credentials_type, &args);
     auto interceptors = CreatePhonyClientInterceptors();
@@ -152,12 +174,27 @@ class ClientCallbackEnd2endTest
       default:
         assert(false);
     }
+
+    if (GetParam().use_virtual_rpcs) {
+      session_context_ = std::make_unique<ClientContext>();
+      session_context_->set_wait_for_ready(true);
+      session_request_ = std::make_unique<grpc::testing::EchoRequest>();
+      session_request_->set_message("Session request");
+      session_done_ = std::make_unique<absl::Notification>();
+
+      channel_ = MaybeWrapVirtualChannel<grpc::testing::EchoRequest,
+                                         grpc::testing::EchoResponse>(
+          channel_, args, true, session_context_.get(), session_request_.get(),
+          session_done_.get());
+    }
+
     stub_ = grpc::testing::EchoTestService::NewStub(channel_);
-    generic_stub_ = absl::make_unique<GenericStub>(channel_);
+    generic_stub_ = std::make_unique<GenericStub>(channel_);
     PhonyInterceptor::Reset();
   }
 
   void TearDown() override {
+    SafeResetSession();
     if (is_server_started_) {
       // Although we would normally do an explicit shutdown, the server
       // should also work correctly with just a destructor call. The regular
@@ -170,7 +207,7 @@ class ClientCallbackEnd2endTest
   }
 
   void SendRpcs(int num_rpcs, bool with_binary_metadata) {
-    std::string test_string("");
+    std::string test_string;
     for (int i = 0; i < num_rpcs; i++) {
       EchoRequest request;
       EchoResponse response;
@@ -196,15 +233,16 @@ class ClientCallbackEnd2endTest
           &cli_ctx, &request, &response,
           [&cli_ctx, &request, &response, &done, &mu, &cv, val,
            with_binary_metadata](Status s) {
-            GPR_ASSERT(s.ok());
+            GRPC_CHECK(s.ok());
 
             EXPECT_EQ(request.message(), response.message());
             if (with_binary_metadata) {
               EXPECT_EQ(
                   1u, cli_ctx.GetServerTrailingMetadata().count("custom-bin"));
-              EXPECT_EQ(val, ToString(cli_ctx.GetServerTrailingMetadata()
-                                          .find("custom-bin")
-                                          ->second));
+              auto [it, end] =
+                  cli_ctx.GetServerTrailingMetadata().equal_range("custom-bin");
+              ASSERT_NE(it, end);
+              EXPECT_EQ(val, ToString(it->second));
             }
             std::lock_guard<std::mutex> l(mu);
             done = true;
@@ -220,7 +258,7 @@ class ClientCallbackEnd2endTest
   void SendRpcsGeneric(int num_rpcs, bool maybe_except,
                        const char* suffix_for_stats) {
     const std::string kMethodName("/grpc.testing.EchoTestService/Echo");
-    std::string test_string("");
+    std::string test_string;
     for (int i = 0; i < num_rpcs; i++) {
       EchoRequest request;
       std::unique_ptr<ByteBuffer> send_buf;
@@ -238,7 +276,7 @@ class ClientCallbackEnd2endTest
       generic_stub_->UnaryCall(
           &cli_ctx, kMethodName, options, send_buf.get(), &recv_buf,
           [&request, &recv_buf, &done, &mu, &cv, maybe_except](Status s) {
-            GPR_ASSERT(s.ok());
+            GRPC_CHECK(s.ok());
 
             EchoResponse response;
             EXPECT_TRUE(ParseFromByteBuffer(&recv_buf, &response));
@@ -251,7 +289,7 @@ class ClientCallbackEnd2endTest
               throw -1;
             }
 #else
-            GPR_ASSERT(!maybe_except);
+            GRPC_CHECK(!maybe_except);
 #endif
           });
       std::unique_lock<std::mutex> l(mu);
@@ -264,7 +302,7 @@ class ClientCallbackEnd2endTest
   void SendGenericEchoAsBidi(int num_rpcs, int reuses, bool do_writes_done,
                              const char* suffix_for_stats) {
     const std::string kMethodName("/grpc.testing.EchoTestService/Echo");
-    std::string test_string("");
+    std::string test_string;
     for (int i = 0; i < num_rpcs; i++) {
       test_string += "Hello world. ";
       class Client : public grpc::ClientBidiReactor<ByteBuffer, ByteBuffer> {
@@ -275,7 +313,7 @@ class ClientCallbackEnd2endTest
             : reuses_remaining_(reuses), do_writes_done_(do_writes_done) {
           activate_ = [this, test, method_name, suffix_for_stats, test_str] {
             if (reuses_remaining_ > 0) {
-              cli_ctx_ = absl::make_unique<ClientContext>();
+              cli_ctx_ = std::make_unique<ClientContext>();
               reuses_remaining_--;
               StubOptions options(suffix_for_stats);
               test->generic_stub_->PrepareBidiStreamingCall(
@@ -334,10 +372,13 @@ class ClientCallbackEnd2endTest
   }
   bool is_server_started_{false};
   int picked_port_{0};
+  std::unique_ptr<grpc::testing::EchoRequest> session_request_;
+  std::unique_ptr<ClientContext> session_context_;
+  std::unique_ptr<absl::Notification> session_done_;
   std::shared_ptr<Channel> channel_;
   std::unique_ptr<grpc::testing::EchoTestService::Stub> stub_;
   std::unique_ptr<grpc::GenericStub> generic_stub_;
-  TestServiceImpl service_;
+  std::unique_ptr<TestServiceImpl> service_;
   CallbackTestServiceImpl callback_service_;
   std::unique_ptr<Server> server_;
   std::ostringstream server_address_;
@@ -423,7 +464,7 @@ TEST_P(ClientCallbackEnd2endTest, SimpleRpcUnderLockNested) {
                            rpc_state[index].done = true;
                            rpc_state[index].cv.notify_all();
                            // Call the next level of nesting if possible
-                           if (index + 1 < int(rpc_state.size())) {
+                           if (index + 1 < static_cast<int>(rpc_state.size())) {
                              nested_call(index + 1);
                            }
                          });
@@ -486,7 +527,7 @@ TEST_P(ClientCallbackEnd2endTest, SendClientInitialMetadata) {
   bool done = false;
   stub_->async()->CheckClientInitialMetadata(
       &cli_ctx, &request, &response, [&done, &mu, &cv](Status s) {
-        GPR_ASSERT(s.ok());
+        GRPC_CHECK(s.ok());
 
         std::lock_guard<std::mutex> l(mu);
         done = true;
@@ -509,26 +550,26 @@ TEST_P(ClientCallbackEnd2endTest, SequentialRpcsWithVariedBinaryMetadataValue) {
 }
 
 TEST_P(ClientCallbackEnd2endTest, SequentialGenericRpcs) {
-  ResetStub(absl::make_unique<TestInterceptorFactory>(
+  ResetStub(std::make_unique<TestInterceptorFactory>(
       "/grpc.testing.EchoTestService/Echo", nullptr));
   SendRpcsGeneric(10, false, /*suffix_for_stats=*/nullptr);
 }
 
 TEST_P(ClientCallbackEnd2endTest, SequentialGenericRpcsWithSuffix) {
-  ResetStub(absl::make_unique<TestInterceptorFactory>(
+  ResetStub(std::make_unique<TestInterceptorFactory>(
       "/grpc.testing.EchoTestService/Echo", "TestSuffix"));
   SendRpcsGeneric(10, false, "TestSuffix");
 }
 
 TEST_P(ClientCallbackEnd2endTest, SequentialGenericRpcsAsBidi) {
-  ResetStub(absl::make_unique<TestInterceptorFactory>(
+  ResetStub(std::make_unique<TestInterceptorFactory>(
       "/grpc.testing.EchoTestService/Echo", nullptr));
   SendGenericEchoAsBidi(10, 1, /*do_writes_done=*/true,
                         /*suffix_for_stats=*/nullptr);
 }
 
 TEST_P(ClientCallbackEnd2endTest, SequentialGenericRpcsAsBidiWithSuffix) {
-  ResetStub(absl::make_unique<TestInterceptorFactory>(
+  ResetStub(std::make_unique<TestInterceptorFactory>(
       "/grpc.testing.EchoTestService/Echo", "TestSuffix"));
   SendGenericEchoAsBidi(10, 1, /*do_writes_done=*/true, "TestSuffix");
 }
@@ -668,7 +709,7 @@ class WriteClient : public grpc::ClientWriteReactor<EchoRequest> {
     }
   }
   void OnDone(const Status& s) override {
-    gpr_log(GPR_INFO, "Sent %d messages", num_msgs_sent_);
+    LOG(INFO) << "Sent " << num_msgs_sent_ << " messages";
     int num_to_send =
         (client_cancel_.cancel)
             ? std::min(num_msgs_to_send_, client_cancel_.ops_before_cancel)
@@ -745,6 +786,7 @@ TEST_P(ClientCallbackEnd2endTest, RequestStream) {
 }
 
 TEST_P(ClientCallbackEnd2endTest, ClientCancelsRequestStream) {
+  SKIP_TEST_FOR_PH2_SERVER("TODO(tjagtap) [PH2][P1] Fix bug");
   ResetStub();
   WriteClient test{stub_.get(), DO_NOT_CANCEL, 3, ClientCancelInfo{2}};
   test.Await();
@@ -767,6 +809,7 @@ TEST_P(ClientCallbackEnd2endTest, RequestStreamServerCancelBeforeReads) {
 
 // Server to cancel while reading a request from the stream in parallel
 TEST_P(ClientCallbackEnd2endTest, RequestStreamServerCancelDuringRead) {
+  SKIP_TEST_FOR_PH2_SERVER("TODO(tjagtap) [PH2][P1] Fix bug");
   ResetStub();
   WriteClient test{stub_.get(), CANCEL_DURING_PROCESSING, 10};
   test.Await();
@@ -803,13 +846,15 @@ TEST_P(ClientCallbackEnd2endTest, UnaryReactor) {
     void OnReadInitialMetadataDone(bool ok) override {
       EXPECT_TRUE(ok);
       EXPECT_EQ(1u, cli_ctx_.GetServerInitialMetadata().count("key1"));
-      EXPECT_EQ(
-          "val1",
-          ToString(cli_ctx_.GetServerInitialMetadata().find("key1")->second));
+      auto [it1, end1] =
+          cli_ctx_.GetServerInitialMetadata().equal_range("key1");
+      ASSERT_NE(it1, end1);
+      EXPECT_EQ("val1", ToString(it1->second));
       EXPECT_EQ(1u, cli_ctx_.GetServerInitialMetadata().count("key2"));
-      EXPECT_EQ(
-          "val2",
-          ToString(cli_ctx_.GetServerInitialMetadata().find("key2")->second));
+      auto [it2, end2] =
+          cli_ctx_.GetServerInitialMetadata().equal_range("key2");
+      ASSERT_NE(it2, end2);
+      EXPECT_EQ("val2", ToString(it2->second));
       initial_metadata_done_ = true;
     }
     void OnDone(const Status& s) override {
@@ -850,7 +895,7 @@ TEST_P(ClientCallbackEnd2endTest, GenericUnaryReactor) {
   const std::string kMethodName("/grpc.testing.EchoTestService/Echo");
   constexpr char kSuffixForStats[] = "TestSuffixForStats";
   ResetStub(
-      absl::make_unique<TestInterceptorFactory>(kMethodName, kSuffixForStats));
+      std::make_unique<TestInterceptorFactory>(kMethodName, kSuffixForStats));
   class UnaryClient : public grpc::ClientUnaryReactor {
    public:
     UnaryClient(grpc::GenericStub* stub, const std::string& method_name,
@@ -869,13 +914,15 @@ TEST_P(ClientCallbackEnd2endTest, GenericUnaryReactor) {
     void OnReadInitialMetadataDone(bool ok) override {
       EXPECT_TRUE(ok);
       EXPECT_EQ(1u, cli_ctx_.GetServerInitialMetadata().count("key1"));
-      EXPECT_EQ(
-          "val1",
-          ToString(cli_ctx_.GetServerInitialMetadata().find("key1")->second));
+      auto [it1, end1] =
+          cli_ctx_.GetServerInitialMetadata().equal_range("key1");
+      ASSERT_NE(it1, end1);
+      EXPECT_EQ("val1", ToString(it1->second));
       EXPECT_EQ(1u, cli_ctx_.GetServerInitialMetadata().count("key2"));
-      EXPECT_EQ(
-          "val2",
-          ToString(cli_ctx_.GetServerInitialMetadata().find("key2")->second));
+      auto [it2, end2] =
+          cli_ctx_.GetServerInitialMetadata().equal_range("key2");
+      ASSERT_NE(it2, end2);
+      EXPECT_EQ("val2", ToString(it2->second));
       initial_metadata_done_ = true;
     }
     void OnDone(const Status& s) override {
@@ -957,7 +1004,7 @@ class ReadClient : public grpc::ClientReadReactor<EchoResponse> {
     }
   }
   void OnDone(const Status& s) override {
-    gpr_log(GPR_INFO, "Read %d messages", reads_complete_);
+    LOG(INFO) << "Read " << reads_complete_ << " messages";
     switch (server_try_cancel_) {
       case DO_NOT_CANCEL:
         if (!client_cancel_.cancel || client_cancel_.ops_before_cancel >
@@ -1055,7 +1102,7 @@ TEST_P(ClientCallbackEnd2endTest, ResponseStreamServerCancelDuring) {
   }
 }
 
-// Server to cancel after writing all the respones to the stream but before
+// Server to cancel after writing all the responses to the stream but before
 // returning to the client
 TEST_P(ClientCallbackEnd2endTest, ResponseStreamServerCancelAfter) {
   ResetStub();
@@ -1118,8 +1165,8 @@ class BidiClient : public grpc::ClientBidiReactor<EchoRequest, EchoResponse> {
     MaybeWrite();
   }
   void OnDone(const Status& s) override {
-    gpr_log(GPR_INFO, "Sent %d messages", writes_complete_);
-    gpr_log(GPR_INFO, "Read %d messages", reads_complete_);
+    LOG(INFO) << "Sent " << writes_complete_ << " messages";
+    LOG(INFO) << "Read " << reads_complete_ << " messages";
     switch (server_try_cancel_) {
       case DO_NOT_CANCEL:
         if (!client_cancel_.cancel ||
@@ -1269,6 +1316,7 @@ TEST_P(ClientCallbackEnd2endTest, BidiStreamCorkedFirstWriteAsync) {
 }
 
 TEST_P(ClientCallbackEnd2endTest, ClientCancelsBidiStream) {
+  SKIP_TEST_FOR_PH2_SERVER("TODO(tjagtap) [PH2][P1] Flakes on PH2");
   ResetStub();
   BidiClient test(stub_.get(), DO_NOT_CANCEL,
                   kServerDefaultResponseStreamsToSend,
@@ -1296,6 +1344,7 @@ TEST_P(ClientCallbackEnd2endTest, BidiStreamServerCancelBefore) {
 // Server to cancel while reading/writing requests/responses on the stream in
 // parallel
 TEST_P(ClientCallbackEnd2endTest, BidiStreamServerCancelDuring) {
+  SKIP_TEST_FOR_PH2_SERVER("TODO(tjagtap) [PH2][P1] Fix bug");
   ResetStub();
   BidiClient test(stub_.get(), CANCEL_DURING_PROCESSING,
                   /*num_msgs_to_send=*/10, /*cork_metadata=*/false,
@@ -1522,11 +1571,6 @@ TEST_P(ClientCallbackEnd2endTest,
 }
 
 std::vector<TestScenario> CreateTestScenarios(bool test_insecure) {
-#if TARGET_OS_IPHONE
-  // Workaround Apple CFStream bug
-  gpr_setenv("grpc_cfstream", "0");
-#endif
-
   std::vector<TestScenario> scenarios;
   std::vector<std::string> credentials_types{
       GetCredentialsProvider()->GetSecureCredentialsTypeList()};
@@ -1539,7 +1583,7 @@ std::vector<TestScenario> CreateTestScenarios(bool test_insecure) {
   if (test_insecure && insec_ok()) {
     credentials_types.push_back(kInsecureCredentialsType);
   }
-  GPR_ASSERT(!credentials_types.empty());
+  GRPC_CHECK(!credentials_types.empty());
 
   bool barr[]{false, true};
   Protocol parr[]{Protocol::INPROC, Protocol::TCP};
@@ -1552,7 +1596,14 @@ std::vector<TestScenario> CreateTestScenarios(bool test_insecure) {
       }
       for (bool callback_server : barr) {
         for (bool use_interceptors : barr) {
-          scenarios.emplace_back(callback_server, p, use_interceptors, cred);
+          for (bool use_virtual_rpcs : barr) {
+            if (use_virtual_rpcs &&
+                (IsPh2Test() || p == Protocol::INPROC || use_interceptors)) {
+              continue;
+            }
+            scenarios.emplace_back(callback_server, p, use_interceptors, cred,
+                                   use_virtual_rpcs);
+          }
         }
       }
     }

@@ -23,14 +23,20 @@ load(
 package(
     default_visibility = ["//visibility:public"],
     features = [
-        "-layering_check",
-        "-parse_headers",
+        "layering_check",
+        "parse_headers",
     ],
 )
 
 licenses(["notice"])
 
 exports_files(["LICENSE"])
+
+grpc_cc_library(
+    name = "proto_parser_helper",
+    srcs = ["proto_parser_helper.cc"],
+    hdrs = ["proto_parser_helper.h"],
+)
 
 grpc_cc_library(
     name = "grpc_plugin_support",
@@ -70,10 +76,17 @@ grpc_cc_library(
     ],
     external_deps = [
         "protobuf_clib",
+        "protobuf",
     ],
-    language = "c++",
     deps = [
+        "proto_parser_helper",
+        "//:gpr_platform",
         "//:grpc++_config_proto",
+        "@com_google_protobuf//src/google/protobuf/compiler/csharp:names",
+        "@com_google_protobuf//src/google/protobuf/compiler/objectivec:names",
+        "@com_google_protobuf//src/google/protobuf/compiler/php:names",
+        "@com_google_protobuf//src/google/protobuf/io",
+        "@com_google_protobuf//src/google/protobuf/io:printer",
     ],
 )
 
@@ -98,7 +111,12 @@ grpc_proto_plugin(
 grpc_proto_plugin(
     name = "grpc_objective_c_plugin",
     srcs = ["objective_c_plugin.cc"],
-    deps = [":grpc_plugin_support"],
+    deps = [
+        ":grpc_plugin_support",
+        "@com_google_protobuf//:protobuf",
+        "@com_google_protobuf//src/google/protobuf/compiler:code_generator",
+        "@com_google_protobuf//src/google/protobuf/compiler/objectivec:names",
+    ],
 )
 
 grpc_proto_plugin(

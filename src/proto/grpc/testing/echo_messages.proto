@@ -19,7 +19,7 @@ package grpc.testing;
 
 option cc_enable_arenas = true;
 
-import "src/proto/grpc/testing/xds/v3/orca_load_report.proto";
+import "xds/data/orca/v3/orca_load_report.proto";
 
 // Message to be echoed back serialized in trailer.
 message DebugInfo {
@@ -54,6 +54,15 @@ message RequestParams {
   bool echo_metadata_initially = 17;
   bool server_notify_client_when_started = 18;
   xds.data.orca.v3.OrcaLoadReport backend_metrics = 19;
+  bool echo_host_from_authority_header = 20;
+
+  enum CompressionAlgorithm {
+    NONE = 0;
+    DEFLATE = 1;
+    GZIP = 2;
+  }
+  CompressionAlgorithm compression_algorithm = 21;
+  bool echo_local_address = 22;
 }
 
 message EchoRequest {
@@ -65,6 +74,7 @@ message ResponseParams {
   int64 request_deadline = 1;
   string host = 2;
   string peer = 3;
+  string local_address = 4;
 }
 
 message EchoResponse {

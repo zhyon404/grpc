@@ -1,270 +1,274 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
-#include <stdbool.h>
-#include <stdio.h>
-#include <string.h>
+#include <grpc/status.h>
+#include <stdint.h>
 
-#include <grpc/byte_buffer.h>
-#include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
-#include <grpc/support/time.h>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
 
+#include "src/core/call/call_filters.h"
+#include "src/core/call/message.h"
+#include "src/core/call/metadata.h"
+#include "src/core/call/metadata_batch.h"
+#include "src/core/config/core_configuration.h"
+#include "src/core/lib/channel/channel_fwd.h"
 #include "src/core/lib/channel/channel_stack.h"
-#include "src/core/lib/channel/channel_stack_builder.h"
-#include "src/core/lib/config/core_configuration.h"
-#include "src/core/lib/surface/channel_init.h"
-#include "test/core/end2end/cq_verifier.h"
+#include "src/core/lib/channel/promise_based_filter.h"
+#include "src/core/lib/iomgr/closure.h"
+#include "src/core/lib/iomgr/error.h"
+#include "src/core/lib/promise/arena_promise.h"
+#include "src/core/lib/promise/context.h"
+#include "src/core/lib/promise/promise.h"
+#include "src/core/lib/slice/slice.h"
+#include "src/core/lib/surface/channel_stack_type.h"
+#include "src/core/lib/transport/transport.h"
+#include "src/core/util/debug_location.h"
+#include "src/core/util/status_helper.h"
+#include "src/core/util/time.h"
+#include "test/core/call/batch_builder.h"
 #include "test/core/end2end/end2end_tests.h"
+#include "gtest/gtest.h"
+#include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "absl/strings/string_view.h"
 
-static void* tag(intptr_t t) { return reinterpret_cast<void*>(t); }
+namespace grpc_core {
+namespace {
 
-static grpc_end2end_test_fixture begin_test(grpc_end2end_test_config config,
-                                            const char* test_name,
-                                            grpc_channel_args* client_args,
-                                            grpc_channel_args* server_args) {
-  grpc_end2end_test_fixture f;
-  gpr_log(GPR_INFO, "Running test: %s/%s", test_name, config.name);
-  f = config.create_fixture(client_args, server_args);
-  config.init_server(&f, server_args);
-  config.init_client(&f, client_args);
-  return f;
-}
+constexpr absl::string_view kFailureMode = "failure-mode";
+constexpr absl::string_view kGoodMessage = "foo";
+constexpr absl::string_view kBadMessage = "bar";
 
-static gpr_timespec n_seconds_from_now(int n) {
-  return grpc_timeout_seconds_to_deadline(n);
-}
+////////////////////////////////////////////////////////////////////////////////
+// Test filter that fails on receiving a message with kBadMessage.
 
-static gpr_timespec five_seconds_from_now(void) {
-  return n_seconds_from_now(5);
-}
-
-static void drain_cq(grpc_completion_queue* cq) {
-  grpc_event ev;
-  do {
-    ev = grpc_completion_queue_next(cq, five_seconds_from_now(), nullptr);
-  } while (ev.type != GRPC_QUEUE_SHUTDOWN);
-}
-
-static void shutdown_server(grpc_end2end_test_fixture* f) {
-  if (!f->server) return;
-  grpc_server_shutdown_and_notify(f->server, f->cq, tag(1000));
-  grpc_event ev;
-  do {
-    ev = grpc_completion_queue_next(f->cq, grpc_timeout_seconds_to_deadline(5),
-                                    nullptr);
-  } while (ev.type != GRPC_OP_COMPLETE || ev.tag != tag(1000));
-  grpc_server_destroy(f->server);
-  f->server = nullptr;
-}
-
-static void shutdown_client(grpc_end2end_test_fixture* f) {
-  if (!f->client) return;
-  grpc_channel_destroy(f->client);
-  f->client = nullptr;
-}
-
-static void end_test(grpc_end2end_test_fixture* f) {
-  shutdown_server(f);
-  shutdown_client(f);
-
-  grpc_completion_queue_shutdown(f->cq);
-  drain_cq(f->cq);
-  grpc_completion_queue_destroy(f->cq);
-}
-
-/* Simple request via a server filter that always closes the stream.*/
-static void test_request(grpc_end2end_test_config config) {
-  grpc_call* c;
-  grpc_call* s;
-  grpc_slice request_payload_slice =
-      grpc_slice_from_copied_string("hello world");
-  grpc_byte_buffer* request_payload =
-      grpc_raw_byte_buffer_create(&request_payload_slice, 1);
-  grpc_end2end_test_fixture f =
-      begin_test(config, "filter_causes_close", nullptr, nullptr);
-  cq_verifier* cqv = cq_verifier_create(f.cq);
-  grpc_op ops[6];
-  grpc_op* op;
-  grpc_metadata_array initial_metadata_recv;
-  grpc_metadata_array trailing_metadata_recv;
-  grpc_metadata_array request_metadata_recv;
-  grpc_byte_buffer* request_payload_recv = nullptr;
-  grpc_call_details call_details;
-  grpc_status_code status;
-  grpc_call_error error;
-  grpc_slice details;
-
-  gpr_timespec deadline = five_seconds_from_now();
-  c = grpc_channel_create_call(f.client, nullptr, GRPC_PROPAGATE_DEFAULTS, f.cq,
-                               grpc_slice_from_static_string("/foo"), nullptr,
-                               deadline, nullptr);
-  GPR_ASSERT(c);
-
-  grpc_metadata_array_init(&initial_metadata_recv);
-  grpc_metadata_array_init(&trailing_metadata_recv);
-  grpc_metadata_array_init(&request_metadata_recv);
-  grpc_call_details_init(&call_details);
-
-  memset(ops, 0, sizeof(ops));
-  op = ops;
-  op->op = GRPC_OP_SEND_INITIAL_METADATA;
-  op->data.send_initial_metadata.count = 0;
-  op->data.send_initial_metadata.metadata = nullptr;
-  op->flags = 0;
-  op->reserved = nullptr;
-  op++;
-  op->op = GRPC_OP_SEND_MESSAGE;
-  op->data.send_message.send_message = request_payload;
-  op->flags = 0;
-  op->reserved = nullptr;
-  op++;
-  op->op = GRPC_OP_SEND_CLOSE_FROM_CLIENT;
-  op->flags = 0;
-  op->reserved = nullptr;
-  op++;
-  op->op = GRPC_OP_RECV_INITIAL_METADATA;
-  op->data.recv_initial_metadata.recv_initial_metadata = &initial_metadata_recv;
-  op->flags = 0;
-  op->reserved = nullptr;
-  op++;
-  op->op = GRPC_OP_RECV_STATUS_ON_CLIENT;
-  op->data.recv_status_on_client.trailing_metadata = &trailing_metadata_recv;
-  op->data.recv_status_on_client.status = &status;
-  op->data.recv_status_on_client.status_details = &details;
-  op->flags = 0;
-  op->reserved = nullptr;
-  op++;
-  error = grpc_call_start_batch(c, ops, static_cast<size_t>(op - ops), tag(1),
-                                nullptr);
-  GPR_ASSERT(GRPC_CALL_OK == error);
-
-  error =
-      grpc_server_request_call(f.server, &s, &call_details,
-                               &request_metadata_recv, f.cq, f.cq, tag(101));
-  GPR_ASSERT(GRPC_CALL_OK == error);
-
-  CQ_EXPECT_COMPLETION(cqv, tag(1), 1);
-  cq_verify(cqv);
-
-  GPR_ASSERT(status == GRPC_STATUS_PERMISSION_DENIED);
-  GPR_ASSERT(0 ==
-             grpc_slice_str_cmp(details, "Failure that's not preventable."));
-
-  grpc_slice_unref(details);
-  grpc_metadata_array_destroy(&initial_metadata_recv);
-  grpc_metadata_array_destroy(&trailing_metadata_recv);
-  grpc_metadata_array_destroy(&request_metadata_recv);
-  grpc_call_details_destroy(&call_details);
-
-  grpc_call_unref(c);
-
-  cq_verifier_destroy(cqv);
-
-  grpc_byte_buffer_destroy(request_payload);
-  grpc_byte_buffer_destroy(request_payload_recv);
-
-  end_test(&f);
-  config.tear_down_data(&f);
-}
-
-/*******************************************************************************
- * Test filter - always closes incoming requests
- */
-
-typedef struct {
-  grpc_closure* recv_im_ready;
-} call_data;
-
-typedef struct {
-  uint8_t unused;
-} channel_data;
-
-static void recv_im_ready(void* arg, grpc_error_handle error) {
-  grpc_call_element* elem = static_cast<grpc_call_element*>(arg);
-  call_data* calld = static_cast<call_data*>(elem->call_data);
-  grpc_core::Closure::Run(
-      DEBUG_LOCATION, calld->recv_im_ready,
-      grpc_error_set_int(GRPC_ERROR_CREATE_REFERENCING_FROM_STATIC_STRING(
-                             "Failure that's not preventable.", &error, 1),
-                         GRPC_ERROR_INT_GRPC_STATUS,
-                         GRPC_STATUS_PERMISSION_DENIED));
-}
-
-static void start_transport_stream_op_batch(
-    grpc_call_element* elem, grpc_transport_stream_op_batch* op) {
-  call_data* calld = static_cast<call_data*>(elem->call_data);
-  if (op->recv_initial_metadata) {
-    calld->recv_im_ready =
-        op->payload->recv_initial_metadata.recv_initial_metadata_ready;
-    op->payload->recv_initial_metadata.recv_initial_metadata_ready =
-        GRPC_CLOSURE_CREATE(recv_im_ready, elem, grpc_schedule_on_exec_ctx);
+class TestFilterFailOnMessage
+    : public ImplementChannelFilter<TestFilterFailOnMessage> {
+ public:
+  static const grpc_channel_filter kFilter;
+  static absl::string_view TypeName() {
+    return "filter_causes_close_on_message";
   }
-  grpc_call_next_op(elem, op);
+  static absl::StatusOr<std::unique_ptr<TestFilterFailOnMessage>> Create(
+      const ChannelArgs&, ChannelFilter::Args) {
+    return std::make_unique<TestFilterFailOnMessage>();
+  }
+
+  class Call {
+   public:
+    static const NoInterceptor OnClientInitialMetadata;
+    static const NoInterceptor OnServerInitialMetadata;
+    static const NoInterceptor OnServerTrailingMetadata;
+    ServerMetadataHandle OnClientToServerMessage(const Message& message) {
+      if (message.payload()->JoinIntoString() == kGoodMessage) {
+        return nullptr;
+      }
+
+      auto md = GetContext<Arena>()->MakePooled<ServerMetadata>();
+      md->Set(GrpcStatusMetadata(), GRPC_STATUS_PERMISSION_DENIED);
+      md->Set(GrpcMessageMetadata(),
+              Slice::FromStaticString("Failure that's not preventable."));
+      md->Set(HostMetadata(), Slice::FromStaticString("test-host"));
+      md->Set(GrpcTarPit());
+      md->Append(
+          "test-failure", Slice::FromStaticString("Failing as requested."),
+          [](absl::string_view, const Slice&) {
+            LOG(FATAL)
+                << "Appending test_failure on the server should never happen.";
+          });
+      md->Append(
+          "test-failure-bin",
+          Slice::FromStaticString("Failing as requested binary."),
+          [](absl::string_view, const Slice&) {
+            LOG(FATAL)
+                << "Appending test_failure on the server should never happen.";
+          });
+      return md;
+    }
+    static const NoInterceptor OnClientToServerHalfClose;
+    static const NoInterceptor OnServerToClientMessage;
+    static const NoInterceptor OnFinalize;
+    channelz::PropertyList ChannelzProperties() {
+      return channelz::PropertyList();
+    }
+  };
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// Test filter that fails on client initial metadata with kFailureMode.
+
+class TestFilterFailOnClientInitialMetadata
+    : public ImplementChannelFilter<TestFilterFailOnClientInitialMetadata> {
+ public:
+  static const grpc_channel_filter kFilter;
+  static absl::string_view TypeName() {
+    return "filter_causes_close_on_client_initial_metadata";
+  }
+  static absl::StatusOr<std::unique_ptr<TestFilterFailOnClientInitialMetadata>>
+  Create(const ChannelArgs&, ChannelFilter::Args) {
+    return std::make_unique<TestFilterFailOnClientInitialMetadata>();
+  }
+
+  class Call {
+   public:
+    absl::Status OnClientInitialMetadata(ClientMetadata& md) {
+      std::string failure_mode_buffer;
+      std::optional<absl::string_view> failure_mode =
+          md.GetStringValue(kFailureMode, &failure_mode_buffer);
+      if (failure_mode.has_value() && *failure_mode == "true") {
+        return absl::PermissionDeniedError(
+            "More failure that's not preventable.");
+      }
+      return absl::OkStatus();
+    }
+    static const NoInterceptor OnClientToServerMessage;
+    static const NoInterceptor OnServerInitialMetadata;
+    static const NoInterceptor OnServerTrailingMetadata;
+    static const NoInterceptor OnClientToServerHalfClose;
+    static const NoInterceptor OnServerToClientMessage;
+    static const NoInterceptor OnFinalize;
+    channelz::PropertyList ChannelzProperties() {
+      return channelz::PropertyList();
+    }
+  };
+};
+
+const NoInterceptor
+    TestFilterFailOnClientInitialMetadata::Call::OnClientToServerMessage;
+const NoInterceptor
+    TestFilterFailOnClientInitialMetadata::Call::OnServerInitialMetadata;
+const NoInterceptor
+    TestFilterFailOnClientInitialMetadata::Call::OnServerTrailingMetadata;
+const NoInterceptor
+    TestFilterFailOnClientInitialMetadata::Call::OnClientToServerHalfClose;
+const NoInterceptor
+    TestFilterFailOnClientInitialMetadata::Call::OnServerToClientMessage;
+const NoInterceptor TestFilterFailOnClientInitialMetadata::Call::OnFinalize;
+
+const NoInterceptor TestFilterFailOnMessage::Call::OnClientInitialMetadata;
+const NoInterceptor TestFilterFailOnMessage::Call::OnServerInitialMetadata;
+const NoInterceptor TestFilterFailOnMessage::Call::OnServerTrailingMetadata;
+const NoInterceptor TestFilterFailOnMessage::Call::OnClientToServerHalfClose;
+const NoInterceptor TestFilterFailOnMessage::Call::OnServerToClientMessage;
+const NoInterceptor TestFilterFailOnMessage::Call::OnFinalize;
+
+const grpc_channel_filter TestFilterFailOnClientInitialMetadata::kFilter =
+    MakePromiseBasedFilter<TestFilterFailOnClientInitialMetadata,
+                           FilterEndpoint::kServer>();
+
+const grpc_channel_filter TestFilterFailOnMessage::kFilter =
+    MakePromiseBasedFilter<TestFilterFailOnMessage, FilterEndpoint::kServer,
+                           kFilterExaminesInboundMessages>();
+
+///////////////////////////////////////////////////////////////////////////////
+// Tests
+
+// Test to verify that the server can close the call when a filter fails.
+// Also verifies that the server sends trailing metadata with the failed
+// status and message to the client.
+void FilterCloseOnInitialMetadata(CoreEnd2endTest& test) {
+  auto c = test.NewClientCall("/foo").Timeout(Duration::Seconds(5)).Create();
+  IncomingStatusOnClient server_status;
+  IncomingMetadata server_initial_metadata;
+  c.NewBatch(1)
+      .SendInitialMetadata({{kFailureMode, "true"}})
+      .SendMessage(kGoodMessage)
+      .SendCloseFromClient()
+      .RecvInitialMetadata(server_initial_metadata)
+      .RecvStatusOnClient(server_status);
+  test.Expect(1, true);
+  test.Step();
+
+  EXPECT_EQ(server_status.status(), GRPC_STATUS_PERMISSION_DENIED);
+  EXPECT_EQ(server_status.message(), "More failure that's not preventable.");
 }
 
-static grpc_error_handle init_call_elem(
-    grpc_call_element* /*elem*/, const grpc_call_element_args* /*args*/) {
-  return GRPC_ERROR_NONE;
+// Test to verify that the server can close the call when a filter fails.
+// Also verifies that the cancellation is propagated through the filters and
+// the metadata fields set in the filter are sent back to the client.
+void FilterCloseOnMessage(CoreEnd2endTest& test) {
+  auto c = test.NewClientCall("/foo").Timeout(Duration::Seconds(10)).Create();
+
+  IncomingStatusOnClient server_status;
+  IncomingMetadata server_initial_metadata;
+  IncomingMetadata server_trailing_metadata;
+  c.NewBatch(1)
+      .SendInitialMetadata({{kFailureMode, "false"}})
+      .RecvInitialMetadata(server_initial_metadata)
+      .RecvStatusOnClient(server_status);
+
+  auto s = test.RequestCall(100);
+  test.Expect(100, true);
+  test.Step();
+
+  IncomingMessage server_message;
+  s.NewBatch(101).RecvMessage(server_message);
+  c.NewBatch(2).SendMessage(kGoodMessage);
+  test.Expect(2, true);
+  test.Expect(101, true);
+  test.Step();
+
+  IncomingMessage server_message_2;
+  s.NewBatch(102).RecvMessage(server_message_2);
+  c.NewBatch(3).SendMessage(kBadMessage);
+  // This behavior is caused by the fact that in case of proxy, on getting the
+  // kBadMessage, the proxy (server) filter fails with the expected error
+  // (invokes recv_message callback with an error) and sends expected trailing
+  // metadata back to the client. But the proxy (client) sends a RST_STREAM to
+  // the server to close the stream. When this happens, the server invokes
+  // recv_message callback with an absl::OkStatus() and hence the RecvMessage
+  // op does not fail.
+  bool supports_request_proxying =
+      test.test_config()->feature_mask & FEATURE_MASK_SUPPORTS_REQUEST_PROXYING;
+  test.Expect(102, supports_request_proxying);
+  test.Expect(3, true);
+  test.Expect(1, true);
+  test.Step();
+
+  EXPECT_EQ(server_status.status(), GRPC_STATUS_PERMISSION_DENIED);
+  EXPECT_EQ(server_status.message(), "Failure that's not preventable.");
+  EXPECT_EQ(server_status.GetTrailingMetadata("test-failure"),
+            "Failing as requested.");
+  EXPECT_EQ(server_status.GetTrailingMetadata("test-failure-bin"),
+            "Failing as requested binary.");
+  EXPECT_EQ(server_status.GetTrailingMetadata(HostMetadata::key()),
+            "test-host");
 }
 
-static void destroy_call_elem(grpc_call_element* /*elem*/,
-                              const grpc_call_final_info* /*final_info*/,
-                              grpc_closure* /*ignored*/) {}
+CORE_END2END_TEST(CoreEnd2endTests, FilterCausesClose) {
+  bool is_virtual = test_config()->feature_mask & FEATURE_MASK_IS_VIRTUAL_RPC;
+  CoreConfiguration::RegisterEphemeralBuilder(
+      [is_virtual](CoreConfiguration::Builder* builder) {
+        auto channel_type =
+            is_virtual ? GRPC_SERVER_VIRTUAL_CHANNEL : GRPC_SERVER_CHANNEL;
+        builder->channel_init()->RegisterFilter<TestFilterFailOnMessage>(
+            channel_type);
+        builder->channel_init()
+            ->RegisterFilter<TestFilterFailOnClientInitialMetadata>(
+                channel_type);
+      });
 
-static grpc_error_handle init_channel_elem(
-    grpc_channel_element* /*elem*/, grpc_channel_element_args* /*args*/) {
-  return GRPC_ERROR_NONE;
+  FilterCloseOnInitialMetadata(*this);
+  FilterCloseOnMessage(*this);
 }
 
-static void destroy_channel_elem(grpc_channel_element* /*elem*/) {}
-
-static const grpc_channel_filter test_filter = {
-    start_transport_stream_op_batch,
-    nullptr,
-    grpc_channel_next_op,
-    sizeof(call_data),
-    init_call_elem,
-    grpc_call_stack_ignore_set_pollset_or_pollset_set,
-    destroy_call_elem,
-    sizeof(channel_data),
-    init_channel_elem,
-    grpc_channel_stack_no_post_init,
-    destroy_channel_elem,
-    grpc_channel_next_get_info,
-    "filter_causes_close"};
-
-/*******************************************************************************
- * Registration
- */
-
-void filter_causes_close(grpc_end2end_test_config config) {
-  grpc_core::CoreConfiguration::RunWithSpecialConfiguration(
-      [](grpc_core::CoreConfiguration::Builder* builder) {
-        grpc_core::BuildCoreConfiguration(builder);
-        builder->channel_init()->RegisterStage(
-            GRPC_SERVER_CHANNEL, 0,
-            [](grpc_core::ChannelStackBuilder* builder) {
-              builder->PrependFilter(&test_filter);
-              return true;
-            });
-      },
-      [config] { test_request(config); });
-}
-
-void filter_causes_close_pre_init(void) {}
+}  // namespace
+}  // namespace grpc_core

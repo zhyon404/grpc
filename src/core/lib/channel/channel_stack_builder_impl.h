@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef GRPC_CORE_LIB_CHANNEL_CHANNEL_STACK_BUILDER_IMPL_H
-#define GRPC_CORE_LIB_CHANNEL_CHANNEL_STACK_BUILDER_IMPL_H
+#ifndef GRPC_SRC_CORE_LIB_CHANNEL_CHANNEL_STACK_BUILDER_IMPL_H
+#define GRPC_SRC_CORE_LIB_CHANNEL_CHANNEL_STACK_BUILDER_IMPL_H
 
 #include <grpc/support/port_platform.h>
 
-#include "absl/status/statusor.h"
-
+#include "src/core/lib/channel/channel_fwd.h"
 #include "src/core/lib/channel/channel_stack_builder.h"
-#include "src/core/lib/gprpp/ref_counted_ptr.h"
+#include "src/core/util/ref_counted_ptr.h"
+#include "absl/status/statusor.h"
 
 namespace grpc_core {
 
@@ -40,6 +40,7 @@ class ChannelStackBuilderImpl final : public ChannelStackBuilder {
   // On failure, *result is nullptr.
   absl::StatusOr<RefCountedPtr<grpc_channel_stack>> Build() override;
 };
+
 }  // namespace grpc_core
 
-#endif  // GRPC_CORE_LIB_CHANNEL_CHANNEL_STACK_BUILDER_IMPL_H
+#endif  // GRPC_SRC_CORE_LIB_CHANNEL_CHANNEL_STACK_BUILDER_IMPL_H

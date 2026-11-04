@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM silkeh/clang:13
+FROM silkeh/clang:19-bookworm
 
 # Install prerequisites for the clang-tidy script
 RUN apt-get update && apt-get install -y python3 jq git && apt-get clean
@@ -27,3 +27,5 @@ ADD clang_tidy_all_the_things.sh /
 RUN chmod a+rx /clang_tidy_all_the_things.sh
 
 CMD ["echo 'Run with tools/distrib/clang_tidy_code.sh'"]
+
+

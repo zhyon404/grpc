@@ -12,47 +12,62 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from importlib import resources
 import os
 import sys
 
 from grpc_tools import protoc
-import pkg_resources
 import setuptools
 
 
-def build_package_protos(package_root, strict_mode=False):
-    proto_files = []
-    inclusion_root = os.path.abspath(package_root)
-    for root, _, files in os.walk(inclusion_root):
-        for filename in files:
-            if filename.endswith('.proto'):
-                proto_files.append(os.path.abspath(os.path.join(root,
-                                                                filename)))
+def _get_resource_file_name(
+    package_or_requirement: str, resource_name: str
+) -> str:
+    """Obtain the filename for a resource on the file system."""
+    file_name = (
+        resources.files(package_or_requirement) / resource_name
+    ).resolve()
+    return str(file_name)
 
-    well_known_protos_include = pkg_resources.resource_filename(
-        'grpc_tools', '_proto')
+
+def build_package_protos(package_root, strict_mode=False):
+
+    proto_files = []
+
+    for root, _, files in os.walk(package_root):
+        for filename in files:
+            if filename.endswith(".proto"):
+                proto_files.append(os.path.join(root, filename))
+
+    well_known_protos_include = _get_resource_file_name("grpc_tools", "_proto")
 
     for proto_file in proto_files:
         command = [
-            'grpc_tools.protoc',
-            '--proto_path={}'.format(inclusion_root),
-            '--proto_path={}'.format(well_known_protos_include),
-            '--python_out={}'.format(inclusion_root),
-            '--grpc_python_out={}'.format(inclusion_root),
+            "grpc_tools.protoc",
+            "--proto_path={}".format(package_root),
+            "--proto_path={}".format(well_known_protos_include),
+            "--python_out={}".format(package_root),
+            "--pyi_out={}".format(package_root),
+            "--grpc_python_out={}".format(package_root),
         ] + [proto_file]
         if protoc.main(command) != 0:
             if strict_mode:
-                raise Exception('error: {} failed'.format(command))
+                raise Exception("error: {} failed".format(command))
             else:
-                sys.stderr.write('warning: {} failed'.format(command))
+                sys.stderr.write("warning: {} failed".format(command))
 
 
 class BuildPackageProtos(setuptools.Command):
     """Command to generate project *_pb2.py modules from proto files."""
 
-    description = 'build grpc protobuf modules'
-    user_options = [('strict-mode', 's',
-                     'exit with non-zero value if the proto compiling fails.')]
+    description = "build grpc protobuf modules"
+    user_options = [
+        (
+            "strict-mode",
+            "s",
+            "exit with non-zero value if the proto compiling fails.",
+        )
+    ]
 
     def initialize_options(self):
         self.strict_mode = False
@@ -65,5 +80,6 @@ class BuildPackageProtos(setuptools.Command):
         # directory is provided as an 'include' directory. We assume it's the '' key
         # to `self.distribution.package_dir` (and get a key error if it's not
         # there).
-        build_package_protos(self.distribution.package_dir[''],
-                             self.strict_mode)
+        build_package_protos(
+            self.distribution.package_dir[""], self.strict_mode
+        )

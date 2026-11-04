@@ -24,7 +24,7 @@ lib_dir = File.join(File.dirname(this_dir), 'lib')
 $LOAD_PATH.unshift(lib_dir) unless $LOAD_PATH.include?(lib_dir)
 
 require 'grpc'
-require 'multi_json'
+require 'json'
 require 'route_guide_services_pb'
 
 include Routeguide
@@ -164,7 +164,7 @@ def main
   end
   raw_data = []
   File.open(ARGV[0]) do |f|
-    raw_data = MultiJson.load(f.read)
+    raw_data = JSON.parse(f.read)
   end
   feature_db = Hash[raw_data.map { |x| [x['location'], x['name']] }]
   port = '0.0.0.0:50051'
@@ -172,10 +172,10 @@ def main
   s.add_http2_port(port, :this_port_is_insecure)
   GRPC.logger.info("... running insecurely on #{port}")
   s.handle(ServerImpl.new(feature_db))
-  # Runs the server with SIGHUP, SIGINT and SIGQUIT signal handlers to 
+  # Runs the server with SIGHUP, SIGINT and SIGTERM signal handlers to
   #   gracefully shutdown.
   # User could also choose to run server via call to run_till_terminated
-  s.run_till_terminated_or_interrupted([1, 'int', 'SIGQUIT'])
+  s.run_till_terminated_or_interrupted([1, 'int', 'SIGTERM'])
 end
 
 main

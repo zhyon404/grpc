@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM silkeh/clang:13
+FROM silkeh/clang:19-bookworm
 
 ADD clang_format_all_the_things.sh /
 
@@ -21,3 +21,5 @@ ADD clang_format_all_the_things.sh /
 RUN chmod a+rx /clang_format_all_the_things.sh
 
 CMD ["echo 'Run with tools/distrib/clang_format_code.sh'"]
+
+

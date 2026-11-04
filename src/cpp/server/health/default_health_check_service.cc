@@ -1,34 +1,38 @@
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2016 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "src/cpp/server/health/default_health_check_service.h"
 
-#include <memory>
-
-#include "absl/memory/memory.h"
-#include "upb/upb.hpp"
-
 #include <grpc/slice.h>
-#include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
-#include <grpcpp/impl/codegen/method_handler.h>
+#include <grpcpp/impl/rpc_method.h>
+#include <grpcpp/impl/rpc_service_method.h>
+#include <grpcpp/impl/server_callback_handlers.h>
+#include <grpcpp/support/slice.h>
+#include <stdint.h>
 
-#include "src/proto/grpc/health/v1/health.upb.h"
+#include <memory>
+#include <utility>
+
+#include "grpc/health/v1/health.upb.h"
+#include "src/core/util/grpc_check.h"
+#include "upb/base/string_view.h"
+#include "upb/mem/arena.hpp"
+#include "absl/log/log.h"
 
 #define MAX_SERVICE_NAME_LENGTH 200
 
@@ -44,7 +48,7 @@ DefaultHealthCheckService::DefaultHealthCheckService() {
 
 void DefaultHealthCheckService::SetServingStatus(
     const std::string& service_name, bool serving) {
-  grpc::internal::MutexLock lock(&mu_);
+  grpc::internal::MutexLock lock(mu_);
   if (shutdown_) {
     // Set to NOT_SERVING in case service_name is not in the map.
     serving = false;
@@ -54,7 +58,7 @@ void DefaultHealthCheckService::SetServingStatus(
 
 void DefaultHealthCheckService::SetServingStatus(bool serving) {
   const ServingStatus status = serving ? SERVING : NOT_SERVING;
-  grpc::internal::MutexLock lock(&mu_);
+  grpc::internal::MutexLock lock(mu_);
   if (shutdown_) return;
   for (auto& p : services_map_) {
     ServiceData& service_data = p.second;
@@ -63,7 +67,7 @@ void DefaultHealthCheckService::SetServingStatus(bool serving) {
 }
 
 void DefaultHealthCheckService::Shutdown() {
-  grpc::internal::MutexLock lock(&mu_);
+  grpc::internal::MutexLock lock(mu_);
   if (shutdown_) return;
   shutdown_ = true;
   for (auto& p : services_map_) {
@@ -75,7 +79,7 @@ void DefaultHealthCheckService::Shutdown() {
 DefaultHealthCheckService::ServingStatus
 DefaultHealthCheckService::GetServingStatus(
     const std::string& service_name) const {
-  grpc::internal::MutexLock lock(&mu_);
+  grpc::internal::MutexLock lock(mu_);
   auto it = services_map_.find(service_name);
   if (it == services_map_.end()) return NOT_FOUND;
   const ServiceData& service_data = it->second;
@@ -85,7 +89,7 @@ DefaultHealthCheckService::GetServingStatus(
 void DefaultHealthCheckService::RegisterWatch(
     const std::string& service_name,
     grpc_core::RefCountedPtr<HealthCheckServiceImpl::WatchReactor> watcher) {
-  grpc::internal::MutexLock lock(&mu_);
+  grpc::internal::MutexLock lock(mu_);
   ServiceData& service_data = services_map_[service_name];
   watcher->SendHealth(service_data.GetServingStatus());
   service_data.AddWatch(std::move(watcher));
@@ -94,7 +98,7 @@ void DefaultHealthCheckService::RegisterWatch(
 void DefaultHealthCheckService::UnregisterWatch(
     const std::string& service_name,
     HealthCheckServiceImpl::WatchReactor* watcher) {
-  grpc::internal::MutexLock lock(&mu_);
+  grpc::internal::MutexLock lock(mu_);
   auto it = services_map_.find(service_name);
   if (it == services_map_.end()) return;
   ServiceData& service_data = it->second;
@@ -104,8 +108,8 @@ void DefaultHealthCheckService::UnregisterWatch(
 
 DefaultHealthCheckService::HealthCheckServiceImpl*
 DefaultHealthCheckService::GetHealthCheckService() {
-  GPR_ASSERT(impl_ == nullptr);
-  impl_ = absl::make_unique<HealthCheckServiceImpl>(this);
+  GRPC_CHECK(impl_ == nullptr);
+  impl_ = std::make_unique<HealthCheckServiceImpl>(this);
   return impl_.get();
 }
 
@@ -163,7 +167,7 @@ DefaultHealthCheckService::HealthCheckServiceImpl::HealthCheckServiceImpl(
 }
 
 DefaultHealthCheckService::HealthCheckServiceImpl::~HealthCheckServiceImpl() {
-  grpc::internal::MutexLock lock(&mu_);
+  grpc::internal::MutexLock lock(mu_);
   shutdown_ = true;
   while (num_watches_ > 0) {
     shutdown_condition_.Wait(&mu_);
@@ -249,12 +253,12 @@ DefaultHealthCheckService::HealthCheckServiceImpl::WatchReactor::WatchReactor(
     HealthCheckServiceImpl* service, const ByteBuffer* request)
     : service_(service) {
   {
-    grpc::internal::MutexLock lock(&service_->mu_);
+    grpc::internal::MutexLock lock(service_->mu_);
     ++service_->num_watches_;
   }
   bool success = DecodeRequest(*request, &service_name_);
-  gpr_log(GPR_DEBUG, "[HCS %p] watcher %p \"%s\": watch call started", service_,
-          this, service_name_.c_str());
+  VLOG(2) << "[HCS " << service_ << "] watcher " << this << " \""
+          << service_name_ << "\": watch call started";
   if (!success) {
     MaybeFinishLocked(Status(StatusCode::INTERNAL, "could not parse request"));
     return;
@@ -265,15 +269,14 @@ DefaultHealthCheckService::HealthCheckServiceImpl::WatchReactor::WatchReactor(
 
 void DefaultHealthCheckService::HealthCheckServiceImpl::WatchReactor::
     SendHealth(ServingStatus status) {
-  gpr_log(GPR_DEBUG,
-          "[HCS %p] watcher %p \"%s\": SendHealth() for ServingStatus %d",
-          service_, this, service_name_.c_str(), status);
-  grpc::internal::MutexLock lock(&mu_);
+  VLOG(2) << "[HCS " << service_ << "] watcher " << this << " \""
+          << service_name_ << "\": SendHealth() for ServingStatus " << status;
+  grpc::internal::MutexLock lock(mu_);
   // If there's already a send in flight, cache the new status, and
   // we'll start a new send for it when the one in flight completes.
   if (write_pending_) {
-    gpr_log(GPR_DEBUG, "[HCS %p] watcher %p \"%s\": queuing write", service_,
-            this, service_name_.c_str());
+    VLOG(2) << "[HCS " << service_ << "] watcher " << this << " \""
+            << service_name_ << "\": queuing write";
     pending_status_ = status;
     return;
   }
@@ -287,7 +290,7 @@ void DefaultHealthCheckService::HealthCheckServiceImpl::WatchReactor::
   if (finish_called_) return;
   // Check if we're shutting down.
   {
-    grpc::internal::MutexLock lock(&service_->mu_);
+    grpc::internal::MutexLock lock(service_->mu_);
     if (service_->shutdown_) {
       MaybeFinishLocked(
           Status(StatusCode::CANCELLED, "not writing due to shutdown"));
@@ -301,19 +304,18 @@ void DefaultHealthCheckService::HealthCheckServiceImpl::WatchReactor::
         Status(StatusCode::INTERNAL, "could not encode response"));
     return;
   }
-  gpr_log(GPR_DEBUG,
-          "[HCS %p] watcher %p \"%s\": starting write for ServingStatus %d",
-          service_, this, service_name_.c_str(), status);
+  VLOG(2) << "[HCS " << service_ << "] watcher " << this << " \""
+          << service_name_ << "\": starting write for ServingStatus " << status;
   write_pending_ = true;
   StartWrite(&response_);
 }
 
 void DefaultHealthCheckService::HealthCheckServiceImpl::WatchReactor::
     OnWriteDone(bool ok) {
-  gpr_log(GPR_DEBUG, "[HCS %p] watcher %p \"%s\": OnWriteDone(): ok=%d",
-          service_, this, service_name_.c_str(), ok);
+  VLOG(2) << "[HCS " << service_ << "] watcher " << this << " \""
+          << service_name_ << "\": OnWriteDone(): ok=" << ok;
   response_.Clear();
-  grpc::internal::MutexLock lock(&mu_);
+  grpc::internal::MutexLock lock(mu_);
   if (!ok) {
     MaybeFinishLocked(Status(StatusCode::CANCELLED, "OnWriteDone() ok=false"));
     return;
@@ -330,16 +332,16 @@ void DefaultHealthCheckService::HealthCheckServiceImpl::WatchReactor::
 
 void DefaultHealthCheckService::HealthCheckServiceImpl::WatchReactor::
     OnCancel() {
-  grpc::internal::MutexLock lock(&mu_);
+  grpc::internal::MutexLock lock(mu_);
   MaybeFinishLocked(Status(StatusCode::UNKNOWN, "OnCancel()"));
 }
 
 void DefaultHealthCheckService::HealthCheckServiceImpl::WatchReactor::OnDone() {
-  gpr_log(GPR_DEBUG, "[HCS %p] watcher %p \"%s\": OnDone()", service_, this,
-          service_name_.c_str());
+  VLOG(2) << "[HCS " << service_ << "] watcher " << this << " \""
+          << service_name_ << "\": OnDone()";
   service_->database_->UnregisterWatch(service_name_, this);
   {
-    grpc::internal::MutexLock lock(&service_->mu_);
+    grpc::internal::MutexLock lock(service_->mu_);
     if (--service_->num_watches_ == 0 && service_->shutdown_) {
       service_->shutdown_condition_.Signal();
     }
@@ -350,13 +352,13 @@ void DefaultHealthCheckService::HealthCheckServiceImpl::WatchReactor::OnDone() {
 
 void DefaultHealthCheckService::HealthCheckServiceImpl::WatchReactor::
     MaybeFinishLocked(Status status) {
-  gpr_log(GPR_DEBUG,
-          "[HCS %p] watcher %p \"%s\": MaybeFinishLocked() with code=%d msg=%s",
-          service_, this, service_name_.c_str(), status.error_code(),
-          status.error_message().c_str());
+  VLOG(2) << "[HCS " << service_ << "] watcher " << this << " \""
+          << service_name_
+          << "\": MaybeFinishLocked() with code=" << status.error_code()
+          << " msg=" << status.error_message();
   if (!finish_called_) {
-    gpr_log(GPR_DEBUG, "[HCS %p] watcher %p \"%s\": actually calling Finish()",
-            service_, this, service_name_.c_str());
+    VLOG(2) << "[HCS " << service_ << "] watcher " << this << " \""
+            << service_name_ << "\": actually calling Finish()";
     finish_called_ = true;
     Finish(status);
   }

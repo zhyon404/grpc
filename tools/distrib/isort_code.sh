@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Copyright 2021 The gRPC Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -ex
+set -eux
 
 ACTION=${1:---overwrite-in-place}
 [[ $ACTION == '--overwrite-in-place' ]] || [[ $ACTION == '--diff' ]]
@@ -26,34 +26,20 @@ fi
 cd "$(dirname "${0}")/../.."
 
 DIRS=(
+    'bazel/update_mirror_helper.py'
     'examples/python'
     'src/python'
     'test'
     'tools'
     'setup.py'
-    'tools/run_tests/xds_k8s_test_driver'
 )
 
-VIRTUALENV=isort_virtual_environment
+VIRTUALENV=".venv-ci-isort"
+python3 -m venv "${VIRTUALENV}"
+source "${VIRTUALENV}/bin/activate"
+python -VV
 
-python3 -m virtualenv $VIRTUALENV
-PYTHON=${VIRTUALENV}/bin/python
-"$PYTHON" -m pip install isort==5.9.2
+pip install isort==6.0.1
+pip list
 
-$PYTHON -m isort $ACTION \
-  --force-sort-within-sections \
-  --force-single-line-imports --single-line-exclusions=typing \
-  --src "examples/python/data_transmission" \
-  --src "examples/python/async_streaming" \
-  --src "tools/run_tests/xds_k8s_test_driver" \
-  --src "src/python/grpcio_tests" \
-  --src "tools/run_tests" \
-  --project "examples" \
-  --project "src" \
-  --thirdparty "grpc" \
-  --skip-glob "third_party/*" \
-  --skip-glob "*/env/*" \
-  --skip-glob "*pb2*.py" \
-  --skip-glob "**/site-packages/**/*" \
-  --dont-follow-links \
-  "${DIRS[@]}"
+isort $ACTION "${DIRS[@]}"

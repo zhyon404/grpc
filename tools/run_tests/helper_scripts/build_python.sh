@@ -77,7 +77,7 @@ function venv_relative_python() {
   fi
 }
 
-# Distutils toolchain to use depending on the system.
+# Toolchain to use depending on the system.
 function toolchain() {
   if [ "$(is_mingw)" ]; then
     echo 'mingw32'
@@ -86,19 +86,18 @@ function toolchain() {
   fi
 }
 
-# TODO(jtattermusch): this adds dependency on grealpath on mac
-# (brew install coreutils) for little reason.
-# Command to invoke the linux command `realpath` or equivalent.
-function script_realpath() {
-  # Find `realpath`
-  if [ -x "$(command -v realpath)" ]; then
-    realpath "$@"
-  elif [ -x "$(command -v grealpath)" ]; then
-    grealpath "$@"
-  else
-    exit 1
-  fi
-}
+# When we mount and reuse the existing repo from host machine inside docker
+# container, the `tools/bazel.rc` file is shared to the docker container and
+# the Bazel override written to `bazel.rc` from tools/.../grpc_build_submodule_at_head.sh
+# (outside docker container) forces bazel to look for the same host location
+# inside the docker container, which doesn't exist.
+# Hence overriding it again with the working directory inside the container
+# should solve this issue
+BAZEL_DEP_PATH="$(pwd)/third_party/protobuf"
+BAZEL_DEP_NAME="com_google_protobuf"
+echo "bazel override_repository is set for ${BAZEL_DEP_NAME} to ${BAZEL_DEP_PATH}"
+echo "build --override_repository=${BAZEL_DEP_NAME}=${BAZEL_DEP_PATH}" >> "tools/bazel.rc"
+echo "query --override_repository=${BAZEL_DEP_NAME}=${BAZEL_DEP_PATH}" >> "tools/bazel.rc"
 
 ####################
 # Script Arguments #
@@ -107,7 +106,6 @@ function script_realpath() {
 PYTHON=${1:-python2.7}
 VENV=${2:-$(venv "$PYTHON")}
 VENV_RELATIVE_PYTHON=${3:-$(venv_relative_python)}
-TOOLCHAIN=${4:-$(toolchain)}
 
 if [ "$(is_msys)" ]; then
   echo "MSYS doesn't directly provide the right compiler(s);"
@@ -116,7 +114,7 @@ if [ "$(is_msys)" ]; then
 fi
 
 ROOT=$(pwd)
-export CFLAGS="-I$ROOT/include -std=gnu99 -fno-wrapv $CFLAGS"
+export CFLAGS="-I$ROOT/include -fno-wrapv $CFLAGS"
 export GRPC_PYTHON_BUILD_WITH_CYTHON=1
 export LANG=en_US.UTF-8
 
@@ -136,58 +134,55 @@ source tools/internal_ci/helper_scripts/prepare_ccache_symlinks_rc
 if [[ "$(inside_venv)" ]]; then
   VENV_PYTHON="$PYTHON"
 else
-  # Instantiate the virtualenv from the Python version passed in.
-  $PYTHON -m pip install --user virtualenv==16.7.9
-  $PYTHON -m virtualenv "$VENV"
-  VENV_PYTHON=$(script_realpath "$VENV/$VENV_RELATIVE_PYTHON")
+  $PYTHON -m venv "$VENV"
+  VENV_PYTHON="$(pwd)/$VENV/$VENV_RELATIVE_PYTHON"
 fi
 
-
-# On library/version/platforms combo that do not have a binary
-# published, we may end up building a dependency from source. In that
-# case, several of our build environment variables may disrupt the
-# third-party build process. This function pipes through only the
-# minimal environment necessary.
 pip_install() {
-  /usr/bin/env -i PATH="$PATH" "$VENV_PYTHON" -m pip install "$@"
+  $VENV_PYTHON -m pip install "$@"
 }
 
-# Pin setuptools to < 60.0.0 to restore the distutil installation, see:
-# https://github.com/pypa/setuptools/pull/2896
-export SETUPTOOLS_USE_DISTUTILS=stdlib
-pip_install --upgrade pip==21.3.1
-pip_install --upgrade setuptools==59.6.0
+pip_install --upgrade pip
+pip_install --upgrade wheel 'setuptools==77.0.1'
 
 # pip-installs the directory specified. Used because on MSYS the vanilla Windows
 # Python gets confused when parsing paths.
 pip_install_dir() {
-  PWD=$(pwd)
+  local workdir
+  workdir="$(pwd)"
   cd "$1"
-  ($VENV_PYTHON setup.py build_ext -c "$TOOLCHAIN" || true)
-  $VENV_PYTHON -m pip install --no-deps .
-  cd "$PWD"
+  "${VENV_PYTHON}" -m pip install --no-deps --no-build-isolation .
+  cd "${workdir}"
 }
 
-# Install gevent
-if [[ "$VENV" == "py36" ]]; then
-  # TODO(https://github.com/grpc/grpc/issues/15411) unpin this
-  pip_install gevent==1.3.b1
-else
-  pip_install -U gevent
-fi
+pip_install_dir_and_deps() {
+  local workdir
+  workdir="$(pwd)"
+  cd "$1"
+  "${VENV_PYTHON}" -m pip install --no-build-isolation .
+  cd "${workdir}"
+}
 
-pip_install --upgrade cython
-pip_install --upgrade six protobuf
-
-if [ "$("$VENV_PYTHON" -c "import sys; print(sys.version_info[0])")" == "2" ]
-then
-  pip_install --upgrade futures enum34
-fi
+# Core build dependencies for grpcio testing. On macOS, these and the
+# pip/wheel/setuptools upgrades above are pre-warmed with network retries into
+# PIP_CACHE_DIR by prepare_build_macos_rc. gevent is pre-built into
+# PIP_FIND_LINKS, because it lacks upstream macOS wheels for Python 3.10.
+pip_install --upgrade gevent 'cython==3.2.8' 'protobuf>=7.35.1,<8.0.0'
 
 pip_install_dir "$ROOT"
 
 $VENV_PYTHON "$ROOT/tools/distrib/python/make_grpcio_tools.py"
-pip_install_dir "$ROOT/tools/distrib/python/grpcio_tools"
+pip_install_dir_and_deps "$ROOT/tools/distrib/python/grpcio_tools"
+
+# Build/install Observability
+# Observability does not support Windows and MacOS.
+if [ "$(is_mingw)" ] || [ "$(is_darwin)" ]; then
+  echo "Skip building grpcio_observability for Windows or MacOS"
+else
+  $VENV_PYTHON "$ROOT/src/python/grpcio_observability/make_grpcio_observability.py"
+  pip_install_dir_and_deps "$ROOT/src/python/grpcio_observability"
+  pip_install_dir_and_deps "$ROOT/src/python/grpcio_csm_observability"
+fi
 
 # Build/install Channelz
 $VENV_PYTHON "$ROOT/src/python/grpcio_channelz/setup.py" preprocess
@@ -209,6 +204,11 @@ $VENV_PYTHON "$ROOT/src/python/grpcio_status/setup.py" preprocess
 $VENV_PYTHON "$ROOT/src/python/grpcio_status/setup.py" build_package_protos
 pip_install_dir "$ROOT/src/python/grpcio_status"
 
+
+# Build/install status proto mapping
+# build_xds_protos.py is invoked as part of generate_projects.sh
+pip_install_dir "$ROOT/py_xds_protos"
+
 # Build/install csds
 pip_install_dir "$ROOT/src/python/grpcio_csds"
 
@@ -219,9 +219,11 @@ pip_install_dir "$ROOT/src/python/grpcio_admin"
 pip_install_dir "$ROOT/src/python/grpcio_testing"
 
 # Build/install tests
-pip_install coverage==4.4 oauth2client==4.1.0 \
-            google-auth>=1.17.2 requests==2.14.2 \
-            googleapis-common-protos>=1.5.5 rsa==4.0
+pip_install "coverage>=7.9.0" oauth2client==4.1.0 \
+            "google-auth>=1.35.0" requests==2.31.0 \
+            rsa==4.0 absl-py==1.4.0 \
+            opentelemetry-sdk==1.21.0
+
 $VENV_PYTHON "$ROOT/src/python/grpcio_tests/setup.py" preprocess
 $VENV_PYTHON "$ROOT/src/python/grpcio_tests/setup.py" build_package_protos
 pip_install_dir "$ROOT/src/python/grpcio_tests"

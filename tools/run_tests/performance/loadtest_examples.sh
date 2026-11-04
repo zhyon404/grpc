@@ -29,7 +29,7 @@ fi
 
 outputbasedir="${1}"
 
-mkdir -p "${outputbasedir}/templates"
+mkdir -p "${outputbasedir}/templates/psm/prebuilt"
 
 example_file() {
     local scenario="${1}"
@@ -42,8 +42,8 @@ example_file() {
         echo "python_asyncio${suffix}"
         return
     fi
-    if [[ "${scenario#php7_protobuf_c_}" != "${scenario}" ]]; then
-        echo "php7_protobuf_c${suffix}"
+    if [[ "${scenario#php8_protobuf_c_}" != "${scenario}" ]]; then
+        echo "php8_protobuf_c${suffix}"
         return
     fi
     echo "${scenario%%_*}${suffix}"
@@ -59,8 +59,8 @@ example_language() {
         echo "python_asyncio"
         return
     fi
-    if [[ "${filename#php7_protobuf_c_}" != "${filename}" ]]; then
-        echo "php7_protobuf_c"
+    if [[ "${filename#php8_protobuf_c_}" != "${filename}" ]]; then
+        echo "php8_protobuf_c"
         return
     fi
     echo "${filename%%_*}"
@@ -73,24 +73,23 @@ scenarios=(
     "go_generic_sync_streaming_ping_pong_secure"
     "java_generic_async_streaming_ping_pong_secure"
     "node_to_node_generic_async_streaming_ping_pong_secure"
-    "php7_protobuf_php_extension_to_cpp_protobuf_sync_unary_ping_pong"
-    "php7_protobuf_c_extension_to_cpp_protobuf_sync_unary_ping_pong"
+    "php8_protobuf_php_extension_to_cpp_protobuf_sync_unary_ping_pong"
+    "php8_protobuf_c_extension_to_cpp_protobuf_sync_unary_ping_pong"
     "python_generic_sync_streaming_ping_pong"
     "python_asyncio_generic_async_streaming_ping_pong"
     "ruby_protobuf_sync_streaming_ping_pong"
+    "rust_protobuf_sync_streaming_ping_pong_secure"
 )
 
 psm_scenarios=(
     "cpp_protobuf_async_unary_5000rpcs_1KB_psm"
-    "csharp_protobuf_async_unary_5000rpcs_1KB_psm"
     "go_protobuf_async_unary_5000rpcs_1KB_psm"
     "java_protobuf_async_unary_5000rpcs_1KB_psm"
     "node_to_node_protobuf_async_unary_5000rpcs_1KB_psm"
-    "php7_protobuf_php_extension_to_cpp_protobuf_async_unary_5000rpcs_1KB_psm"
-    "php7_protobuf_c_extension_to_cpp_protobuf_async_unary_5000rpcs_1KB_psm"
+    "php8_protobuf_php_extension_to_cpp_protobuf_async_unary_5000rpcs_1KB_psm"
+    "php8_protobuf_c_extension_to_cpp_protobuf_async_unary_5000rpcs_1KB_psm"
     "python_protobuf_async_unary_5000rpcs_1KB_psm"
     "python_asyncio_protobuf_async_unary_5000rpcs_1KB_psm"
-    "ruby_protobuf_async_unary_5000rpcs_1KB_psm"
 )
 
 # Basic examples are intended to be runnable _as is_, so substitution keys
@@ -107,7 +106,6 @@ basic_example() {
         -s client_pool= -s server_pool= -s big_query_table= \
         -s timeout_seconds=900 --prefix=examples -u basic -r "^${scenario}$" \
         --allow_client_language=c++ --allow_server_language=c++ \
-        --allow_server_language=node \
         -o "${outputdir}/${outputfile}"
     echo "Created example: ${outputdir}/${outputfile}"
 }
@@ -129,12 +127,11 @@ prebuilt_example() {
         -s prebuilt_image_tag="\${prebuilt_image_tag}" --prefix=examples -u prebuilt \
         -a pool="\${workers_pool}" -r "^${scenario}$" \
         --allow_client_language=c++ --allow_server_language=c++ \
-        --allow_server_language=node \
         -o "${outputdir}/${outputfile}"
     echo "Created example: ${outputdir}/${outputfile}"
 }
 
-# PSM basic examples are intended to be runnable with only subsituding the
+# PSM basic examples are intended to be runnable with only substituting the
 # xds-server and sidecar images, so substitution keys for xds-server and 
 # sidecar images are kept. 
 psm_basic_example() {
@@ -150,8 +147,8 @@ psm_basic_example() {
         -s psm_image_prefix="\${psm_image_prefix}" \
         -s psm_image_tag="\${psm_image_tag}" \
         -s timeout_seconds=900 --prefix=psm-examples -u "${uniquifier}" -r "^${scenario}$" \
+        -a enablePrometheus=true \
         --allow_client_language=c++ --allow_server_language=c++ \
-        --allow_server_language=node \
         --client_channels=8 \
         --category=psm \
         --server_threads=16 \
@@ -180,8 +177,8 @@ psm_prebuilt_example() {
         -s psm_image_tag="\${psm_image_tag}" \
         --prefix=psm-examples -u prebuilt-"${uniquifier}" -r "^${scenario}$" \
         -a pool="\${workers_pool}" \
+        -a enablePrometheus=true \
         --allow_client_language=c++ --allow_server_language=c++ \
-        --allow_server_language=node \
         --client_channels=8 \
         --category=psm \
         --server_threads=16 \

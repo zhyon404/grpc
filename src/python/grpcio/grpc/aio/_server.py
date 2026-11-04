@@ -14,51 +14,72 @@
 """Server-side implementation of gRPC Asyncio Python."""
 
 from concurrent.futures import Executor
-from typing import Any, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 import grpc
 from grpc import _common
 from grpc import _compression
+from grpc import _observability
 from grpc._cython import cygrpc
 
-from . import _base_server
+from . import _base_server  # pyright: ignore[reportPrivateUsage]
 from ._interceptor import ServerInterceptor
 from ._typing import ChannelArgumentType
 
 
-def _augment_channel_arguments(base_options: ChannelArgumentType,
-                               compression: Optional[grpc.Compression]):
+def _augment_channel_arguments(
+    base_options: ChannelArgumentType, compression: Optional[grpc.Compression]
+):
     compression_option = _compression.create_channel_option(compression)
-    return tuple(base_options) + compression_option
+    maybe_server_call_tracer_factory_option = (
+        _observability.create_server_call_tracer_factory_option(xds=False)
+    )
+    return (
+        tuple(base_options)
+        + compression_option
+        + maybe_server_call_tracer_factory_option
+    )
 
 
 class Server(_base_server.Server):
     """Serves RPCs."""
 
-    def __init__(self, thread_pool: Optional[Executor],
-                 generic_handlers: Optional[Sequence[grpc.GenericRpcHandler]],
-                 interceptors: Optional[Sequence[Any]],
-                 options: ChannelArgumentType,
-                 maximum_concurrent_rpcs: Optional[int],
-                 compression: Optional[grpc.Compression]):
+    def __init__(
+        self,
+        thread_pool: Optional[Executor],
+        generic_handlers: Optional[Sequence[grpc.GenericRpcHandler]],
+        interceptors: Optional[Sequence[Any]],
+        options: ChannelArgumentType,
+        maximum_concurrent_rpcs: Optional[int],
+        compression: Optional[grpc.Compression],
+    ):
         self._loop = cygrpc.get_working_loop()
         if interceptors:
             invalid_interceptors = [
-                interceptor for interceptor in interceptors
+                interceptor
+                for interceptor in interceptors
                 if not isinstance(interceptor, ServerInterceptor)
             ]
             if invalid_interceptors:
-                raise ValueError(
-                    'Interceptor must be ServerInterceptor, the '
-                    f'following are invalid: {invalid_interceptors}')
+                error_msg = (
+                    "Interceptor must be ServerInterceptor,"
+                    "the following are invalid: {invalid_interceptors}"
+                )
+                # TODO(asheshvidyut): fix the value error below
+                # not caught by ruff.
+                raise ValueError(error_msg)
         self._server = cygrpc.AioServer(
-            self._loop, thread_pool, generic_handlers, interceptors,
+            self._loop,
+            thread_pool,
+            generic_handlers,
+            interceptors,
             _augment_channel_arguments(options, compression),
-            maximum_concurrent_rpcs)
+            maximum_concurrent_rpcs,
+        )
 
     def add_generic_rpc_handlers(
-            self,
-            generic_rpc_handlers: Sequence[grpc.GenericRpcHandler]) -> None:
+        self, generic_rpc_handlers: Sequence[grpc.GenericRpcHandler]
+    ) -> None:
         """Registers GenericRpcHandlers with this Server.
 
         This method is only safe to call before the server is started.
@@ -68,6 +89,29 @@ class Server(_base_server.Server):
           used to service RPCs.
         """
         self._server.add_generic_rpc_handlers(generic_rpc_handlers)
+
+    def add_registered_method_handlers(
+        self,
+        service_name: str,
+        method_handlers: Dict[str, grpc.RpcMethodHandler],
+    ) -> None:
+        """Registers method handlers for pre-registered methods.
+
+        This method is only safe to call before server is started.
+
+        If the same method has both generic and registered handler,
+        registered handler will take precedence.
+
+        Args:
+          service_name: The service name.
+          method_handlers: A dictionary that maps method names to corresponding
+            RpcMethodHandler.
+        """
+        method_to_handlers = {
+            _common.fully_qualified_method(service_name, method): method_handler
+            for method, method_handler in method_handlers.items()
+        }
+        self._server.add_registered_method_handlers(method_to_handlers)
 
     def add_insecure_port(self, address: str) -> int:
         """Opens an insecure port for accepting RPCs.
@@ -82,10 +126,12 @@ class Server(_base_server.Server):
           An integer port on which the server will accept RPC requests.
         """
         return _common.validate_port_binding_result(
-            address, self._server.add_insecure_port(_common.encode(address)))
+            address, self._server.add_insecure_port(_common.encode(address))
+        )
 
-    def add_secure_port(self, address: str,
-                        server_credentials: grpc.ServerCredentials) -> int:
+    def add_secure_port(
+        self, address: str, server_credentials: grpc.ServerCredentials
+    ) -> int:
         """Opens a secure port for accepting RPCs.
 
         This method may only be called before starting the server.
@@ -101,8 +147,10 @@ class Server(_base_server.Server):
         """
         return _common.validate_port_binding_result(
             address,
-            self._server.add_secure_port(_common.encode(address),
-                                         server_credentials))
+            self._server.add_secure_port(
+                _common.encode(address), server_credentials
+            ),
+        )
 
     async def start(self) -> None:
         """Starts this Server.
@@ -117,11 +165,12 @@ class Server(_base_server.Server):
         This method immediately stops the server from servicing new RPCs in
         all cases.
 
-        If a grace period is specified, this method returns immediately and all
-        RPCs active at the end of the grace period are aborted. If a grace
-        period is not specified (by passing None for grace), all existing RPCs
-        are aborted immediately and this method blocks until the last RPC
-        handler terminates.
+        If a grace period is specified, this method waits until all active
+        RPCs are finished or until the grace period is reached. RPCs that haven't
+        been terminated within the grace period are aborted.
+        If a grace period is not specified (by passing None for grace), all
+        existing RPCs are aborted immediately and this method blocks until
+        the last RPC handler terminates.
 
         This method is idempotent and may be called at any time. Passing a
         smaller grace value in a subsequent call will have the effect of
@@ -135,8 +184,9 @@ class Server(_base_server.Server):
         """
         await self._server.shutdown(grace)
 
-    async def wait_for_termination(self,
-                                   timeout: Optional[float] = None) -> bool:
+    async def wait_for_termination(
+        self, timeout: Optional[float] = None
+    ) -> bool:
         """Block current coroutine until the server stops.
 
         This is an EXPERIMENTAL API.
@@ -165,20 +215,21 @@ class Server(_base_server.Server):
         The Cython AioServer doesn't hold a ref-count to this class. It should
         be safe to slightly extend the underlying Cython object's life span.
         """
-        if hasattr(self, '_server'):
-            if self._server.is_running():
-                cygrpc.schedule_coro_threadsafe(
-                    self._server.shutdown(None),
-                    self._loop,
-                )
+        if hasattr(self, "_server") and self._server.is_running():
+            cygrpc.schedule_coro_threadsafe(
+                self._server.shutdown(None),
+                self._loop,
+            )
 
 
-def server(migration_thread_pool: Optional[Executor] = None,
-           handlers: Optional[Sequence[grpc.GenericRpcHandler]] = None,
-           interceptors: Optional[Sequence[Any]] = None,
-           options: Optional[ChannelArgumentType] = None,
-           maximum_concurrent_rpcs: Optional[int] = None,
-           compression: Optional[grpc.Compression] = None):
+def server(
+    migration_thread_pool: Optional[Executor] = None,
+    handlers: Optional[Sequence[grpc.GenericRpcHandler]] = None,
+    interceptors: Optional[Sequence[Any]] = None,
+    options: Optional[ChannelArgumentType] = None,
+    maximum_concurrent_rpcs: Optional[int] = None,
+    compression: Optional[grpc.Compression] = None,
+):
     """Creates a Server with which RPCs can be serviced.
 
     Args:
@@ -196,15 +247,18 @@ def server(migration_thread_pool: Optional[Executor] = None,
       maximum_concurrent_rpcs: The maximum number of concurrent RPCs this server
         will service before returning RESOURCE_EXHAUSTED status, or None to
         indicate no limit.
-      compression: An element of grpc.compression, e.g.
-        grpc.compression.Gzip. This compression algorithm will be used for the
-        lifetime of the server unless overridden by set_compression. This is an
-        EXPERIMENTAL option.
+      compression: An element of grpc.Compression, e.g.
+        grpc.Compression.Gzip. This compression algorithm will be used for the
+        lifetime of the server unless overridden by set_compression.
 
     Returns:
       A Server object.
     """
-    return Server(migration_thread_pool, () if handlers is None else handlers,
-                  () if interceptors is None else interceptors,
-                  () if options is None else options, maximum_concurrent_rpcs,
-                  compression)
+    return Server(
+        migration_thread_pool,
+        () if handlers is None else handlers,
+        () if interceptors is None else interceptors,
+        () if options is None else options,
+        maximum_concurrent_rpcs,
+        compression,
+    )

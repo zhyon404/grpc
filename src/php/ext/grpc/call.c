@@ -84,7 +84,11 @@ zval *grpc_parse_metadata_array(grpc_metadata_array
     if (php_grpc_zend_hash_find(array_hash, str_key, key_len, (void **)&data)
         == SUCCESS) {
       if (Z_TYPE_P(data) != IS_ARRAY) {
+#if PHP_VERSION_ID >= 80500
+        zend_throw_exception(zend_ce_exception,
+#else
         zend_throw_exception(zend_exception_get_default(TSRMLS_C),
+#endif
                              "Metadata hash somehow contains wrong types.",
                              1 TSRMLS_CC);
         efree(str_key);
@@ -331,6 +335,14 @@ PHP_METHOD(Call, startBatch) {
       goto cleanup;
     }
 
+    // We shouldn't hit this as there are 0-7 valid op codes.
+    // Adding this as a safeguard against incorrect usage of this method.
+    if (op_num >= 8) {
+      zend_throw_exception(spl_ce_InvalidArgumentException,
+                           "Too many operations in batch", 1 TSRMLS_CC);
+      goto cleanup;
+    }
+
     ops[op_num].op = (grpc_op_type)index;
     ops[op_num].flags = 0;
     ops[op_num].reserved = NULL;
@@ -451,7 +463,8 @@ PHP_METHOD(Call, startBatch) {
     op_num++;
   PHP_GRPC_HASH_FOREACH_END()
 
-  error = grpc_call_start_batch(call->wrapped, ops, op_num, call->wrapped,
+  grpc_call *wrapped = call->wrapped;
+  error = grpc_call_start_batch(wrapped, ops, op_num, wrapped,
                                 NULL);
   if (error != GRPC_CALL_OK) {
     zend_throw_exception(spl_ce_LogicException,
@@ -459,7 +472,7 @@ PHP_METHOD(Call, startBatch) {
                          (long)error TSRMLS_CC);
     goto cleanup;
   }
-  grpc_completion_queue_pluck(completion_queue, call->wrapped,
+  grpc_completion_queue_pluck(completion_queue, wrapped,
                               gpr_inf_future(GPR_CLOCK_REALTIME), NULL);
   zval *recv_md;
   for (int i = 0; i < op_num; i++) {
@@ -624,5 +637,10 @@ void grpc_init_call(TSRMLS_D) {
   INIT_CLASS_ENTRY(ce, "Grpc\\Call", call_methods);
   ce.create_object = create_wrapped_grpc_call;
   grpc_ce_call = zend_register_internal_class(&ce TSRMLS_CC);
+  zval property_channel_default_value;
+  ZVAL_NULL(&property_channel_default_value);
+  zend_string *property_channel_name = zend_string_init("channel", sizeof("channel") - 1, 1);
+  zend_declare_property_ex(grpc_ce_call, property_channel_name, &property_channel_default_value, ZEND_ACC_PROTECTED, NULL);
+  zend_string_release(property_channel_name);
   PHP_GRPC_INIT_HANDLER(wrapped_grpc_call, call_ce_handlers);
 }

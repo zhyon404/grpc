@@ -1,23 +1,25 @@
-/*
- *
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2018 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "test/cpp/end2end/interceptors_util.h"
 
+#include "src/core/util/grpc_check.h"
+#include "test/core/test_util/test_config.h"
 #include "absl/memory/memory.h"
 
 namespace grpc {
@@ -49,7 +51,7 @@ void MakeClientStreamingCall(const std::shared_ptr<Channel>& channel) {
   ctx.AddMetadata("testkey", "testvalue");
   req.set_message("Hello");
   EchoResponse resp;
-  string expected_resp = "";
+  string expected_resp;
   auto writer = stub->RequestStream(&ctx, &resp);
   for (int i = 0; i < kNumStreamingMessages; i++) {
     writer->Write(req);
@@ -157,6 +159,7 @@ void MakeAsyncCQBidiStreamingCall(const std::shared_ptr<Channel>& /*channel*/) {
 void MakeCallbackCall(const std::shared_ptr<Channel>& channel) {
   auto stub = grpc::testing::EchoTestService::NewStub(channel);
   ClientContext ctx;
+  ctx.set_deadline(grpc_timeout_milliseconds_to_deadline(20000));
   EchoRequest req;
   std::mutex mu;
   std::condition_variable cv;
@@ -180,8 +183,8 @@ void MakeCallbackCall(const std::shared_ptr<Channel>& channel) {
 
 bool CheckMetadata(const std::multimap<grpc::string_ref, grpc::string_ref>& map,
                    const string& key, const string& value) {
-  for (const auto& pair : map) {
-    if (pair.first.starts_with(key) && pair.second.starts_with(value)) {
+  for (const auto& [k, v] : map) {
+    if (k.starts_with(key) && v.starts_with(value)) {
       return true;
     }
   }
@@ -190,8 +193,8 @@ bool CheckMetadata(const std::multimap<grpc::string_ref, grpc::string_ref>& map,
 
 bool CheckMetadata(const std::multimap<std::string, std::string>& map,
                    const string& key, const string& value) {
-  for (const auto& pair : map) {
-    if (pair.first == key && pair.second == value) {
+  for (const auto& [k, v] : map) {
+    if (k == key && v == value) {
       return true;
     }
   }
@@ -205,7 +208,7 @@ CreatePhonyClientInterceptors() {
   // Add 20 phony interceptors before hijacking interceptor
   creators.reserve(20);
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
   return creators;
 }

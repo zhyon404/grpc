@@ -16,13 +16,32 @@ Server should accept these arguments:
 *   --secure_mode=BOOLEAN
     *   When set to true it uses XdsServerCredentials with the test server for security test cases.
         In case of secure mode, port and maintenance_port should be different.
+*   --enable-csm-observability=BOOLEAN
+    *   When set to true, enable CSM Observability.
+
+Servers that want to support dual stack testing (like Java) should also accept:
+
+*  --address_type=IPV4|IPV6|IPV4_IPV6
+    *   Type of IP address to bind to.  IPV4_IPV6 will use the wildcard address.
+        IPV4 and IPV6 will cause server to bind to one non-localhost and the localhost address of the appropriate type
+
+Servers that want to support metrics reporting for client side weighted round robin testing should also accept:
+
+* --metrics_mode=NONE|IN_BAND|OUT_OF_BAND
+    *   When set to a value other than NONE, use the specified metrics reporting API to report metrics described in the other arguments. Defaults to NONE.
+* --report_qps=NUMBER
+    *   The QPS value to report.
+* --report_application_utilization=NUMBER
+    *   The application_utilization value to report.
+* --report_eps=NUMBER
+    *   The EPS value to report.
 
 In addition, when handling requests, if the initial request metadata contains the `rpc-behavior` key, it should modify its handling of the request as follows:
 
  - If the value matches `sleep-<int>`, the server should wait the specified number of seconds before resuming behavior matching and RPC processing.
  - If the value matches `keep-open`, the server should never respond to the request and behavior matching ends.
  - If the value matches `error-code-<int>`, the server should respond with the specified status code and behavior matching ends.
- - If the value matches `success-on-retry-attempt-<int>`, and the value of the `grpc-previous-rpc-attempts` metadata field is equal to the specified number, the normal RPC processing should resume and behavior matching ends.
+ - If the value matches `succeed-on-retry-attempt-<int>`, and the value of the `grpc-previous-rpc-attempts` metadata field is equal to the specified number, the normal RPC processing should resume and behavior matching ends.
  - A value can have a prefix `hostname=<string>` followed by a space. In that case, the rest of the value should only be applied if the specified hostname matches the server's hostname.
 
 The `rpc-behavior` header value can have multiple options separated by commas. In that case, the value should be split by commas and the options should be applied in the order specified. If a request has multiple `rpc-behavior` metadata values, each one should be processed that way in order.
@@ -58,6 +77,12 @@ Clients should accept these arguments:
     *   The timeout to set on all outbound RPCs. Default is 20.
 *   --secure_mode=BOOLEAN
     *   When set to true it uses XdsChannelCredentials with the test client for security test cases.
+*   --enable-csm-observability=BOOLEAN
+    *   When set to true, enable CSM Observability.
+*   --request_payload_size=INT32
+    *   Set the SimpleRequest.payload.body to a string of repeated '0' characters of the given size in bytes.
+*   --response_payload_size=INT32
+    *   Ask the server to respond with SimpleResponse.payload.body of the given length.
 
 ### XdsUpdateClientConfigureService
 
@@ -100,7 +125,7 @@ service XdsUpdateClientConfigureService {
 ```
 
 The test client changes its behavior right after receiving the
-`ClientConfigureRequest`. Currently it only supports configuring the type(s) 
+`ClientConfigureRequest`. Currently it only supports configuring the type(s)
 of RPCs sent by the test client, metadata attached to each type of RPCs, and the timeout.
 
 ## Test Driver
@@ -626,23 +651,23 @@ There are four sub-tests:
 1. `app_timeout_exceeded`
    1. Test client configured to send UnaryCall RPCs with a 1s application
       timeout, and metadata of `rpc-behavior: sleep-2`.
-   1. Test driver asserts client recieves ~100% status `DEADLINE_EXCEEDED`.
+   1. Test driver asserts client receives ~100% status `DEADLINE_EXCEEDED`.
 1. `timeout_not_exceeded`
    1. Test client configured to send UnaryCall RPCs with the default
       application timeout (20 seconds), and no metadata.
-   1. Test driver asserts client recieves ~100% status `OK`.
+   1. Test driver asserts client receives ~100% status `OK`.
 1. `timeout_exceeded` (executed with the below test case)
 1. `timeout_different_route`
    1. Test client configured to send UnaryCall RPCs and EmptyCall RPCs with
       the default application timeout (20 seconds), and metadata of
       `rpc-behavior: sleep-4`.
-   1. Test driver asserts client recieves ~100% status `OK` for EmptyCall
+   1. Test driver asserts client receives ~100% status `OK` for EmptyCall
       and ~100% status `DEADLINE_EXCEEDED` for UnaryCall.
 
 ### api_listener
-The test case verifies a specific use case where it creates a second TD API 
-listener using the same name as the existing one and then delete the old one. 
-The test driver verifies this is a safe way to update the API listener 
+The test case verifies a specific use case where it creates a second TD API
+listener using the same name as the existing one and then delete the old one.
+The test driver verifies this is a safe way to update the API listener
 configuration while keep using the existing name.
 
 Client parameters:
@@ -657,17 +682,17 @@ Load balancer configuration:
 Assert:
 
 The test driver configuration steps:
-1. The test driver creates the first set of forwarding rule + target proxy + 
+1. The test driver creates the first set of forwarding rule + target proxy +
 URL map with a test host name.
-1. Then the test driver creates a second set of forwarding rule + target proxy + 
+1. Then the test driver creates a second set of forwarding rule + target proxy +
 URL map with the same test host name.
 1. The test driver deletes the first set of configurations in step 1.
 
-The test driver verifies, at each configuration step, the traffic is always able 
+The test driver verifies, at each configuration step, the traffic is always able
 to reach the designated hosts.
 
 ### metadata_filter
-This test case verifies that metadata filter configurations in URL map match 
+This test case verifies that metadata filter configurations in URL map match
 rule are effective at Traffic Director for routing selection against downstream
 node metadata.
 
@@ -691,16 +716,16 @@ Assert:
 At each test sub-case described above, the test driver configures
 and verifies:
 
-1. Set default URL map, and verify traffic goes to the original backend hosts. 
-1. Then patch URL map to update the match rule with metadata filter 
+1. Set default URL map, and verify traffic goes to the original backend hosts.
+1. Then patch URL map to update the match rule with metadata filter
 configuration under test added.
-1. Then it verifies traffic switches to alternate backend service hosts. 
+1. Then it verifies traffic switches to alternate backend service hosts.
 
-This way, we test that TD correctly evaluates both matching and non-matching 
+This way, we test that TD correctly evaluates both matching and non-matching
 configuration scenario.
 
 ### forwarding_rule_port_match
-This test verifies that request server uri port should match with the GCP 
+This test verifies that request server uri port should match with the GCP
 forwarding rule configuration port.
 
 Client parameters:
@@ -715,14 +740,14 @@ Load balancer configuration:
 Assert:
 1. The test driver configures matching port in the forwarding rule and in the
 request server uri, then verifies traffic reaches backend service instances.
-1. The test driver updates the forwarding rule to use a different port, then 
+1. The test driver updates the forwarding rule to use a different port, then
 verifies that the traffic stops going to those backend service instances.
 
 ### forwarding_rule_default_port
-This test verifies that omitting port in the request server uri should only 
-match with the default port(80) configuration in the forwarding rule. 
-In addition, request server uri port should exactly match that in the URL map 
-host rule, as described in 
+This test verifies that omitting port in the request server uri should only
+match with the default port(80) configuration in the forwarding rule.
+In addition, request server uri port should exactly match that in the URL map
+host rule, as described in
 [public doc](https://cloud.google.com/traffic-director/docs/proxyless-overview#proxyless-url-map).
 
 Client parameters:
@@ -737,13 +762,13 @@ Load balancer configuration:
 Assert:
 
 Test driver configures and verifies:
-1. No traffic goes to backends when configuring the target URI 
-`xds:///myservice`, the forwarding rule with port *x != 80*, the URL map 
+1. No traffic goes to backends when configuring the target URI
+`xds:///myservice`, the forwarding rule with port *x != 80*, the URL map
 host rule `myservice::x`.
-1. Traffic goes to backends when configuring the target URI `xds:///myservice`, 
+1. Traffic goes to backends when configuring the target URI `xds:///myservice`,
 the forwarding rule port `80` and the URL map host rule `myservice`.
 1. No traffic goes to backends when configuring the target URI
-`xds:///myservice`, the forwarding rule port `80` and the host rule 
+`xds:///myservice`, the forwarding rule port `80` and the host rule
 `myservice::80`.
 
 ### outlier_detection
@@ -780,3 +805,55 @@ backends and all requests end with the `OK` status.
 3.  The test driver removes the client configuration to send metadata. The
 driver asserts that during some 10-second interval, traffic is equally
 distributed among the five backends, and all requests end with the `OK` status.
+
+### custom_lb
+This test verifies that a custom load balancer policy can be configured in the
+client. It also verifies that when given a list of policies the client can
+ignore a bad one and try the next one on the list until it finds a good one.
+
+Client parameters:
+
+1.  --num_channels=1
+2.  --qps=100
+
+Load balancer configuration:
+
+One MIG with a single backend.
+
+The `backendService` will have the following `localityLbPolicies` entry:
+```json
+[
+  {
+    "customPolicy": {
+      "name": "test.ThisLoadBalancerDoesNotExist",
+      "data": "{ \"foo\": \"bar\" }"
+    }
+  },
+  {
+    "customPolicy": {
+      "name": "test.RpcBehaviorLoadBalancer",
+      "data": "{ \"rpcBehavior\": \"error-code-15\" }"
+    }
+  }
+]
+```
+
+The client **should not** implement the `test.ThisLoadBalancerDoesNotExist`, but
+it **should** implement `test.RpcBehaviorLoadBalancer`. The
+`RpcBehaviorLoadBalancer` implementation should set the rpcBehavior request
+header based on the configuration it is provided. The `rpcBehavior` field value
+in the config should be used as the header value.
+
+Assert:
+
+1. The first custom policy is ignored as the client does not have an
+implementation for it.
+2. The second policy, that **is** implemented by the client, has been applied
+by the client. This can be asserted by confirming that each request has
+failed with the configured error code 15 (DATA_LOSS). We should get this error
+because the test server knows to look for the `rpcBehavior` header and fail
+a request with a provided error code.
+
+Note that while this test is for load balancing, we can get by with a single
+backend as our test load balancer does not perform any actual load balancing,
+instead only applying the `rpcBehavior` header to each request.

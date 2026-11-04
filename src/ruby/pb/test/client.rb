@@ -31,6 +31,7 @@ $LOAD_PATH.unshift(lib_dir) unless $LOAD_PATH.include?(lib_dir)
 $LOAD_PATH.unshift(pb_dir) unless $LOAD_PATH.include?(pb_dir)
 
 require 'optparse'
+require 'json'
 require 'logger'
 
 require_relative '../../lib/grpc'
@@ -319,7 +320,7 @@ class NamedTests
       return
     end
     json_key = File.read(ENV[AUTH_ENV])
-    wanted_email = MultiJson.load(json_key)['client_email']
+    wanted_email = JSON.parse(json_key)['client_email']
     resp = perform_large_unary(fill_username: true,
                                fill_oauth_scope: true)
     assert("#{__callee__}: bad username") { wanted_email == resp.username }
@@ -330,7 +331,7 @@ class NamedTests
 
   def jwt_token_creds
     json_key = File.read(ENV[AUTH_ENV])
-    wanted_email = MultiJson.load(json_key)['client_email']
+    wanted_email = JSON.parse(json_key)['client_email']
     resp = perform_large_unary(fill_username: true)
     assert("#{__callee__}: bad username") { wanted_email == resp.username }
   end
@@ -347,7 +348,7 @@ class NamedTests
     resp = perform_large_unary(fill_username: true,
                                fill_oauth_scope: true)
     json_key = File.read(ENV[AUTH_ENV])
-    wanted_email = MultiJson.load(json_key)['client_email']
+    wanted_email = JSON.parse(json_key)['client_email']
     assert("#{__callee__}: bad username") { wanted_email == resp.username }
     assert("#{__callee__}: bad oauth scope") do
       @args.oauth_scope.include?(resp.oauth_scope)
@@ -366,7 +367,7 @@ class NamedTests
                                fill_oauth_scope: true,
                                credentials: call_creds)
     json_key = File.read(ENV[AUTH_ENV])
-    wanted_email = MultiJson.load(json_key)['client_email']
+    wanted_email = JSON.parse(json_key)['client_email']
     assert("#{__callee__}: bad username") { wanted_email == resp.username }
     assert("#{__callee__}: bad oauth scope") do
       @args.oauth_scope.include?(resp.oauth_scope)
@@ -647,6 +648,22 @@ class NamedTests
           "Received: #{duplex_op.trailing_metadata[trailing_metadata_key]}"
     end
 
+  end
+
+  def special_status_message
+    code = GRPC::Core::StatusCodes::UNKNOWN
+    message = "\t\ntest with whitespace\r\nand Unicode BMP ☺ and non-BMP 😈\t\n"
+    req = SimpleRequest.new(
+      response_status: EchoStatus.new(code: code, message: message))
+    begin
+      resp = @stub.unary_call(req)
+      fail AssertionError, "GRPC::Unknown should have been raised."
+    rescue GRPC::Unknown => e
+      if e.details.force_encoding("UTF-8") != message
+        fail AssertionError,
+          "Expected message #{message}. Received: #{e.details}"
+      end
+    end
   end
 
   def all

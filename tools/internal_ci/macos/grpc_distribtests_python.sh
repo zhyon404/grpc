@@ -25,16 +25,25 @@ export PREPARE_BUILD_INSTALL_DEPS_PYTHON=true
 source tools/internal_ci/helper_scripts/prepare_build_macos_rc
 
 # TODO(jtattermusch): cleanup this prepare build step (needed for python artifact build)
-# install cython for all python versions
-python2.7 -m pip install -U cython setuptools==44.1.1 wheel --user
-python3.5 -m pip install -U cython setuptools==44.1.1 wheel --user
-python3.6 -m pip install -U cython setuptools==44.1.1 wheel --user
-python3.7 -m pip install -U cython setuptools==44.1.1 wheel --user
-python3.8 -m pip install -U cython setuptools==44.1.1 wheel --user
-python3.9 -m pip install -U cython setuptools==44.1.1 wheel --user
+# Pre-install the tools that build_artifact_python.sh installs, with the same
+# pins but with retries on transient PyPI failures. Its own pip installs then
+# find them already satisfied instead of hitting PyPI without retries.
+# Keep the package list in sync with build_artifact_python.sh.
+retry_with_backoff python3.10 -m pip install --user --upgrade pip
+retry_with_backoff python3.10 -m pip install --user setuptools==77.0.1 wheel==0.43.0 build==1.5.0 'cython==3.2.8'
+retry_with_backoff python3.11 -m pip install --user --upgrade pip
+retry_with_backoff python3.11 -m pip install --user setuptools==77.0.1 wheel==0.43.0 build==1.5.0 'cython==3.2.8'
+retry_with_backoff python3.12 -m pip install --user --break-system-packages --upgrade pip
+retry_with_backoff python3.12 -m pip install --user --break-system-packages setuptools==77.0.1 wheel==0.43.0 build==1.5.0 'cython==3.2.8'
+retry_with_backoff python3.13 -m pip install --user --break-system-packages --upgrade pip
+retry_with_backoff python3.13 -m pip install --user --break-system-packages setuptools==77.0.1 wheel==0.43.0 build==1.5.0 'cython==3.2.8'
+retry_with_backoff python3.14 -m pip install --user --break-system-packages --upgrade pip
+retry_with_backoff python3.14 -m pip install --user --break-system-packages setuptools==77.0.1 wheel==0.43.0 build==1.5.0 'cython==3.2.8'
+retry_with_backoff python3.15 -m pip install --user --break-system-packages --upgrade pip
+retry_with_backoff python3.15 -m pip install --user --break-system-packages setuptools==77.0.1 wheel==0.43.0 build==1.5.0 'cython==3.2.8'
 
 # Build all python macos artifacts (this step actually builds all the binary wheels and source archives)
-tools/run_tests/task_runner.py -f artifact macos python ${TASK_RUNNER_EXTRA_FILTERS} -j 4 -x build_artifacts/sponge_log.xml || FAILED="true"
+tools/run_tests/task_runner.py -f artifact macos python ${TASK_RUNNER_EXTRA_FILTERS} -j 2 -x build_artifacts/sponge_log.xml || FAILED="true"
 
 # the next step expects to find the artifacts from the previous step in the "input_artifacts" folder.
 rm -rf input_artifacts
@@ -48,6 +57,9 @@ cp -r input_artifacts/python_*/* artifacts/ || true
 
 # TODO(jtattermusch): Here we would normally run python macos distribtests, but currently no such tests are defined
 # in distribtest_targets.py
+
+# This step checks if any of the artifacts exceeds a per-file size limit.
+tools/internal_ci/helper_scripts/check_python_artifacts_size.sh
 
 tools/internal_ci/helper_scripts/store_artifacts_from_moved_src_tree.sh
 

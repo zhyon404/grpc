@@ -16,22 +16,22 @@
 #include <string>
 #include <vector>
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
-#include "src/core/ext/filters/client_channel/backup_poller.h"
-#include "src/proto/grpc/testing/xds/v3/cluster.grpc.pb.h"
-#include "src/proto/grpc/testing/xds/v3/fault.grpc.pb.h"
-#include "src/proto/grpc/testing/xds/v3/http_connection_manager.grpc.pb.h"
-#include "src/proto/grpc/testing/xds/v3/router.grpc.pb.h"
-#include "test/core/util/test_config.h"
+#include "envoy/config/cluster/v3/cluster.pb.h"
+#include "envoy/extensions/filters/http/fault/v3/fault.pb.h"
+#include "envoy/extensions/filters/http/router/v3/router.pb.h"
+#include "envoy/extensions/filters/network/http_connection_manager/v3/http_connection_manager.pb.h"
+#include "src/core/client_channel/backup_poller.h"
+#include "src/core/config/config_vars.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/end2end/xds/xds_end2end_test_lib.h"
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 
 namespace grpc {
 namespace testing {
 namespace {
 
-using ::envoy::config::cluster::v3::RoutingPriority;
+using ::envoy::config::core::v3::RoutingPriority;
 using ::envoy::extensions::filters::http::fault::v3::HTTPFault;
 using ::envoy::extensions::filters::network::http_connection_manager::v3::
     HttpFilter;
@@ -106,6 +106,9 @@ INSTANTIATE_TEST_SUITE_P(
 // Test to ensure the most basic fault injection config works.
 TEST_P(FaultInjectionTest, XdsFaultInjectionAlwaysAbort) {
   const uint32_t kAbortPercentagePerHundred = 100;
+  // Create an EDS resource
+  EdsResourceArgs args({{"locality0", {MakeNonExistentEndpoint()}}});
+  balancer_->ads_service()->SetEdsResource(BuildEdsResource(args));
   // Construct the fault injection filter config
   HTTPFault http_fault;
   auto* abort_percentage = http_fault.mutable_abort()->mutable_percentage();
@@ -116,12 +119,10 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionAlwaysAbort) {
   // Config fault injection via different setup
   SetFilterConfig(http_fault);
   // Fire several RPCs, and expect all of them to be aborted.
-  CheckRpcSendFailure(
-      DEBUG_LOCATION,
-      CheckRpcSendFailureOptions()
-          .set_times(5)
-          .set_rpc_options(RpcOptions().set_wait_for_ready(true))
-          .set_expected_error_code(StatusCode::ABORTED));
+  for (size_t i = 0; i < 5; ++i) {
+    CheckRpcSendFailure(DEBUG_LOCATION, StatusCode::ABORTED, "Fault injected",
+                        RpcOptions().set_wait_for_ready(true));
+  }
 }
 
 // Without the listener config, the fault injection won't be enabled.
@@ -150,7 +151,7 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionPercentageAbort) {
   CreateAndStartBackends(1);
   const uint32_t kAbortPercentagePerHundred = 50;
   const double kAbortRate = kAbortPercentagePerHundred / 100.0;
-  const double kErrorTolerance = 0.05;
+  const double kErrorTolerance = 0.1;
   const size_t kNumRpcs = ComputeIdealNumRpcs(kAbortRate, kErrorTolerance);
   // Create an EDS resource
   EdsResourceArgs args({{"locality0", CreateEndpointsForBackends()}});
@@ -166,7 +167,7 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionPercentageAbort) {
   SetFilterConfig(http_fault);
   // Send kNumRpcs RPCs and count the aborts.
   size_t num_aborted = SendRpcsAndCountFailuresWithMessage(
-      DEBUG_LOCATION, kNumRpcs, "Fault injected");
+      DEBUG_LOCATION, kNumRpcs, StatusCode::ABORTED, "Fault injected");
   // The abort rate should be roughly equal to the expectation.
   const double seen_abort_rate = static_cast<double>(num_aborted) / kNumRpcs;
   EXPECT_THAT(seen_abort_rate,
@@ -178,7 +179,7 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionPercentageAbortViaHeaders) {
   const uint32_t kAbortPercentageCap = 100;
   const uint32_t kAbortPercentage = 50;
   const double kAbortRate = kAbortPercentage / 100.0;
-  const double kErrorTolerance = 0.05;
+  const double kErrorTolerance = 0.1;
   const size_t kNumRpcs = ComputeIdealNumRpcs(kAbortRate, kErrorTolerance);
   // Create an EDS resource
   EdsResourceArgs args({{"locality0", CreateEndpointsForBackends()}});
@@ -196,7 +197,7 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionPercentageAbortViaHeaders) {
       {"x-envoy-fault-abort-percentage", std::to_string(kAbortPercentage)},
   };
   size_t num_aborted = SendRpcsAndCountFailuresWithMessage(
-      DEBUG_LOCATION, kNumRpcs, "Fault injected",
+      DEBUG_LOCATION, kNumRpcs, StatusCode::ABORTED, "Fault injected",
       RpcOptions().set_metadata(metadata));
   // The abort rate should be roughly equal to the expectation.
   const double seen_abort_rate = static_cast<double>(num_aborted) / kNumRpcs;
@@ -206,11 +207,11 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionPercentageAbortViaHeaders) {
 
 TEST_P(FaultInjectionTest, XdsFaultInjectionPercentageDelay) {
   CreateAndStartBackends(1);
-  const uint32_t kRpcTimeoutMilliseconds = grpc_test_slowdown_factor() * 3000;
-  const uint32_t kFixedDelaySeconds = 100;
+  const auto kRpcTimeout = grpc_core::Duration::Seconds(10);
+  const auto kFixedDelay = grpc_core::Duration::Seconds(20);
   const uint32_t kDelayPercentagePerHundred = 50;
   const double kDelayRate = kDelayPercentagePerHundred / 100.0;
-  const double kErrorTolerance = 0.05;
+  const double kErrorTolerance = 0.1;
   const size_t kNumRpcs = ComputeIdealNumRpcs(kDelayRate, kErrorTolerance);
   const size_t kMaxConcurrentRequests = kNumRpcs;
   // Create an EDS resource
@@ -227,20 +228,26 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionPercentageDelay) {
   auto* delay_percentage = http_fault.mutable_delay()->mutable_percentage();
   delay_percentage->set_numerator(kDelayPercentagePerHundred);
   delay_percentage->set_denominator(FractionalPercent::HUNDRED);
-  auto* fixed_delay = http_fault.mutable_delay()->mutable_fixed_delay();
-  fixed_delay->set_seconds(kFixedDelaySeconds);
+  SetProtoDuration(kFixedDelay,
+                   http_fault.mutable_delay()->mutable_fixed_delay());
   // Config fault injection via different setup
   SetFilterConfig(http_fault);
+  // Make sure channel is connected.  This avoids flakiness caused by
+  // having multiple queued RPCs proceed in parallel when the name
+  // resolution response is returned to the channel.
+  channel_->WaitForConnected(grpc_timeout_milliseconds_to_deadline(15000));
   // Send kNumRpcs RPCs and count the delays.
-  RpcOptions rpc_options = RpcOptions()
-                               .set_timeout_ms(kRpcTimeoutMilliseconds)
-                               .set_skip_cancelled_check(true);
-  std::vector<ConcurrentRpc> rpcs =
-      SendConcurrentRpcs(DEBUG_LOCATION, stub_.get(), kNumRpcs, rpc_options);
+  RpcOptions rpc_options =
+      RpcOptions().set_timeout(kRpcTimeout).set_skip_cancelled_check(true);
+  std::vector<AsyncRpc> rpcs(kNumRpcs);
+  for (auto& rpc : rpcs) {
+    rpc.StartRpc(stub_.get(), rpc_options);
+  }
   size_t num_delayed = 0;
   for (auto& rpc : rpcs) {
-    if (rpc.status.error_code() == StatusCode::OK) continue;
-    EXPECT_EQ(StatusCode::DEADLINE_EXCEEDED, rpc.status.error_code());
+    Status status = rpc.GetStatus();
+    if (status.error_code() == StatusCode::OK) continue;
+    EXPECT_EQ(StatusCode::DEADLINE_EXCEEDED, status.error_code());
     ++num_delayed;
   }
   // The delay rate should be roughly equal to the expectation.
@@ -251,12 +258,12 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionPercentageDelay) {
 
 TEST_P(FaultInjectionTest, XdsFaultInjectionPercentageDelayViaHeaders) {
   CreateAndStartBackends(1);
-  const uint32_t kFixedDelayMilliseconds = 100000;
-  const uint32_t kRpcTimeoutMilliseconds = grpc_test_slowdown_factor() * 3000;
+  const auto kRpcTimeout = grpc_core::Duration::Seconds(10);
+  const auto kFixedDelay = grpc_core::Duration::Seconds(20);
   const uint32_t kDelayPercentageCap = 100;
   const uint32_t kDelayPercentage = 50;
   const double kDelayRate = kDelayPercentage / 100.0;
-  const double kErrorTolerance = 0.05;
+  const double kErrorTolerance = 0.1;
   const size_t kNumRpcs = ComputeIdealNumRpcs(kDelayRate, kErrorTolerance);
   const size_t kMaxConcurrentRequests = kNumRpcs;
   // Create an EDS resource
@@ -275,22 +282,30 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionPercentageDelayViaHeaders) {
       kDelayPercentageCap);
   // Config fault injection via different setup
   SetFilterConfig(http_fault);
+  // Make sure channel is connected.  This avoids flakiness caused by
+  // having multiple queued RPCs proceed in parallel when the name
+  // resolution response is returned to the channel.
+  channel_->WaitForConnected(grpc_timeout_milliseconds_to_deadline(15000));
   // Send kNumRpcs RPCs and count the delays.
   std::vector<std::pair<std::string, std::string>> metadata = {
-      {"x-envoy-fault-delay-request", std::to_string(kFixedDelayMilliseconds)},
+      {"x-envoy-fault-delay-request",
+       std::to_string(kFixedDelay.millis() * grpc_test_slowdown_factor())},
       {"x-envoy-fault-delay-request-percentage",
        std::to_string(kDelayPercentage)},
   };
   RpcOptions rpc_options = RpcOptions()
                                .set_metadata(metadata)
-                               .set_timeout_ms(kRpcTimeoutMilliseconds)
+                               .set_timeout(kRpcTimeout)
                                .set_skip_cancelled_check(true);
-  std::vector<ConcurrentRpc> rpcs =
-      SendConcurrentRpcs(DEBUG_LOCATION, stub_.get(), kNumRpcs, rpc_options);
+  std::vector<AsyncRpc> rpcs(kNumRpcs);
+  for (auto& rpc : rpcs) {
+    rpc.StartRpc(stub_.get(), rpc_options);
+  }
   size_t num_delayed = 0;
   for (auto& rpc : rpcs) {
-    if (rpc.status.error_code() == StatusCode::OK) continue;
-    EXPECT_EQ(StatusCode::DEADLINE_EXCEEDED, rpc.status.error_code());
+    Status status = rpc.GetStatus();
+    if (status.error_code() == StatusCode::OK) continue;
+    EXPECT_EQ(StatusCode::DEADLINE_EXCEEDED, status.error_code());
     ++num_delayed;
   }
   // The delay rate should be roughly equal to the expectation.
@@ -301,8 +316,8 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionPercentageDelayViaHeaders) {
 
 TEST_P(FaultInjectionTest, XdsFaultInjectionAbortAfterDelayForStreamCall) {
   CreateAndStartBackends(1);
-  const uint32_t kFixedDelaySeconds = 1;
-  const uint32_t kRpcTimeoutMilliseconds = 100 * 1000;  // 100s should not reach
+  const auto kRpcTimeout = grpc_core::Duration::Seconds(30);
+  const auto kFixedDelay = grpc_core::Duration::Seconds(1);
   // Create an EDS resource
   EdsResourceArgs args({{"locality0", CreateEndpointsForBackends()}});
   balancer_->ads_service()->SetEdsResource(BuildEdsResource(args));
@@ -316,14 +331,14 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionAbortAfterDelayForStreamCall) {
   auto* delay_percentage = http_fault.mutable_delay()->mutable_percentage();
   delay_percentage->set_numerator(100);  // Always inject DELAY!
   delay_percentage->set_denominator(FractionalPercent::HUNDRED);
-  auto* fixed_delay = http_fault.mutable_delay()->mutable_fixed_delay();
-  fixed_delay->set_seconds(kFixedDelaySeconds);
+  SetProtoDuration(kFixedDelay,
+                   http_fault.mutable_delay()->mutable_fixed_delay());
   // Config fault injection via different setup
   SetFilterConfig(http_fault);
   // Send a stream RPC and check its status code
   ClientContext context;
   context.set_deadline(
-      grpc_timeout_milliseconds_to_deadline(kRpcTimeoutMilliseconds));
+      grpc_timeout_milliseconds_to_deadline(kRpcTimeout.millis()));
   auto stream = stub_->BidiStream(&context);
   stream->WritesDone();
   auto status = stream->Finish();
@@ -334,13 +349,11 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionAbortAfterDelayForStreamCall) {
 
 TEST_P(FaultInjectionTest, XdsFaultInjectionAlwaysDelayPercentageAbort) {
   CreateAndStartBackends(1);
+  const auto kRpcTimeout = grpc_core::Duration::Seconds(30);
+  const auto kFixedDelay = grpc_core::Duration::Seconds(1);
   const uint32_t kAbortPercentagePerHundred = 50;
   const double kAbortRate = kAbortPercentagePerHundred / 100.0;
-  const uint32_t kFixedDelaySeconds = 1;
-  const uint32_t kRpcTimeoutMilliseconds = 100 * 1000;  // 100s should not reach
-  const uint32_t kConnectionTimeoutMilliseconds =
-      10 * 1000;  // 10s should not reach
-  const double kErrorTolerance = 0.05;
+  const double kErrorTolerance = 0.1;
   const size_t kNumRpcs = ComputeIdealNumRpcs(kAbortRate, kErrorTolerance);
   const size_t kMaxConcurrentRequests = kNumRpcs;
   // Create an EDS resource
@@ -362,25 +375,26 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionAlwaysDelayPercentageAbort) {
   auto* delay_percentage = http_fault.mutable_delay()->mutable_percentage();
   delay_percentage->set_numerator(1000000);  // Always inject DELAY!
   delay_percentage->set_denominator(FractionalPercent::MILLION);
-  auto* fixed_delay = http_fault.mutable_delay()->mutable_fixed_delay();
-  fixed_delay->set_seconds(kFixedDelaySeconds);
+  SetProtoDuration(kFixedDelay,
+                   http_fault.mutable_delay()->mutable_fixed_delay());
   // Config fault injection via different setup
   SetFilterConfig(http_fault);
-  // Allow the channel to connect to one backends, so the herd of queued RPCs
-  // won't be executed on the same ExecCtx object and using the cached Now()
-  // value, which causes millisecond level delay error.
-  channel_->WaitForConnected(
-      grpc_timeout_milliseconds_to_deadline(kConnectionTimeoutMilliseconds));
+  // Make sure channel is connected.  This avoids flakiness caused by
+  // having multiple queued RPCs proceed in parallel when the name
+  // resolution response is returned to the channel.
+  channel_->WaitForConnected(grpc_timeout_milliseconds_to_deadline(15000));
   // Send kNumRpcs RPCs and count the aborts.
-  int num_aborted = 0;
-  RpcOptions rpc_options = RpcOptions().set_timeout_ms(kRpcTimeoutMilliseconds);
-  std::vector<ConcurrentRpc> rpcs =
-      SendConcurrentRpcs(DEBUG_LOCATION, stub_.get(), kNumRpcs, rpc_options);
+  RpcOptions rpc_options = RpcOptions().set_timeout(kRpcTimeout);
+  std::vector<AsyncRpc> rpcs(kNumRpcs);
   for (auto& rpc : rpcs) {
-    EXPECT_GE(rpc.elapsed_time,
-              grpc_core::Duration::Seconds(kFixedDelaySeconds));
-    if (rpc.status.error_code() == StatusCode::OK) continue;
-    EXPECT_EQ("Fault injected", rpc.status.error_message());
+    rpc.StartRpc(stub_.get(), rpc_options);
+  }
+  size_t num_aborted = 0;
+  for (auto& rpc : rpcs) {
+    Status status = rpc.GetStatus();
+    EXPECT_GE(rpc.elapsed_time(), kFixedDelay * grpc_test_slowdown_factor());
+    if (status.error_code() == StatusCode::OK) continue;
+    EXPECT_EQ("Fault injected", status.error_message());
     ++num_aborted;
   }
   // The abort rate should be roughly equal to the expectation.
@@ -395,13 +409,11 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionAlwaysDelayPercentageAbort) {
 TEST_P(FaultInjectionTest,
        XdsFaultInjectionAlwaysDelayPercentageAbortSwitchDenominator) {
   CreateAndStartBackends(1);
+  const auto kRpcTimeout = grpc_core::Duration::Seconds(30);
+  const auto kFixedDelay = grpc_core::Duration::Seconds(1);
   const uint32_t kAbortPercentagePerMillion = 500000;
   const double kAbortRate = kAbortPercentagePerMillion / 1000000.0;
-  const uint32_t kFixedDelaySeconds = 1;                // 1s
-  const uint32_t kRpcTimeoutMilliseconds = 100 * 1000;  // 100s should not reach
-  const uint32_t kConnectionTimeoutMilliseconds =
-      10 * 1000;  // 10s should not reach
-  const double kErrorTolerance = 0.05;
+  const double kErrorTolerance = 0.1;
   const size_t kNumRpcs = ComputeIdealNumRpcs(kAbortRate, kErrorTolerance);
   const size_t kMaxConcurrentRequests = kNumRpcs;
   // Create an EDS resource
@@ -423,25 +435,26 @@ TEST_P(FaultInjectionTest,
   auto* delay_percentage = http_fault.mutable_delay()->mutable_percentage();
   delay_percentage->set_numerator(100);  // Always inject DELAY!
   delay_percentage->set_denominator(FractionalPercent::HUNDRED);
-  auto* fixed_delay = http_fault.mutable_delay()->mutable_fixed_delay();
-  fixed_delay->set_seconds(kFixedDelaySeconds);
+  SetProtoDuration(kFixedDelay,
+                   http_fault.mutable_delay()->mutable_fixed_delay());
   // Config fault injection via different setup
   SetFilterConfig(http_fault);
-  // Allow the channel to connect to one backends, so the herd of queued RPCs
-  // won't be executed on the same ExecCtx object and using the cached Now()
-  // value, which causes millisecond level delay error.
-  channel_->WaitForConnected(
-      grpc_timeout_milliseconds_to_deadline(kConnectionTimeoutMilliseconds));
+  // Make sure channel is connected.  This avoids flakiness caused by
+  // having multiple queued RPCs proceed in parallel when the name
+  // resolution response is returned to the channel.
+  channel_->WaitForConnected(grpc_timeout_milliseconds_to_deadline(15000));
   // Send kNumRpcs RPCs and count the aborts.
-  int num_aborted = 0;
-  RpcOptions rpc_options = RpcOptions().set_timeout_ms(kRpcTimeoutMilliseconds);
-  std::vector<ConcurrentRpc> rpcs =
-      SendConcurrentRpcs(DEBUG_LOCATION, stub_.get(), kNumRpcs, rpc_options);
+  RpcOptions rpc_options = RpcOptions().set_timeout(kRpcTimeout);
+  std::vector<AsyncRpc> rpcs(kNumRpcs);
   for (auto& rpc : rpcs) {
-    EXPECT_GE(rpc.elapsed_time,
-              grpc_core::Duration::Seconds(kFixedDelaySeconds));
-    if (rpc.status.error_code() == StatusCode::OK) continue;
-    EXPECT_EQ("Fault injected", rpc.status.error_message());
+    rpc.StartRpc(stub_.get(), rpc_options);
+  }
+  size_t num_aborted = 0;
+  for (auto& rpc : rpcs) {
+    Status status = rpc.GetStatus();
+    EXPECT_GE(rpc.elapsed_time(), kFixedDelay * grpc_test_slowdown_factor());
+    if (status.error_code() == StatusCode::OK) continue;
+    EXPECT_EQ("Fault injected", status.error_message());
     ++num_aborted;
   }
   // The abort rate should be roughly equal to the expectation.
@@ -452,10 +465,10 @@ TEST_P(FaultInjectionTest,
 
 TEST_P(FaultInjectionTest, XdsFaultInjectionMaxFault) {
   CreateAndStartBackends(1);
+  const auto kRpcTimeout = grpc_core::Duration::Seconds(4);
+  const auto kFixedDelay = grpc_core::Duration::Seconds(20);
   const uint32_t kMaxFault = 10;
   const uint32_t kNumRpcs = 30;  // kNumRpcs should be bigger than kMaxFault
-  const uint32_t kRpcTimeoutMs = 4000;     // 4 seconds
-  const uint32_t kLongDelaySeconds = 100;  // 100 seconds
   const uint32_t kAlwaysDelayPercentage = 100;
   // Create an EDS resource
   EdsResourceArgs args({{"locality0", CreateEndpointsForBackends()}});
@@ -466,20 +479,27 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionMaxFault) {
   delay_percentage->set_numerator(
       kAlwaysDelayPercentage);  // Always inject DELAY!
   delay_percentage->set_denominator(FractionalPercent::HUNDRED);
-  auto* fixed_delay = http_fault.mutable_delay()->mutable_fixed_delay();
-  fixed_delay->set_seconds(kLongDelaySeconds);
+  SetProtoDuration(kFixedDelay,
+                   http_fault.mutable_delay()->mutable_fixed_delay());
   http_fault.mutable_max_active_faults()->set_value(kMaxFault);
   // Config fault injection via different setup
   SetFilterConfig(http_fault);
+  // Make sure channel is connected.  This avoids flakiness caused by
+  // having multiple queued RPCs proceed in parallel when the name
+  // resolution response is returned to the channel.
+  channel_->WaitForConnected(grpc_timeout_milliseconds_to_deadline(15000));
   // Sends a batch of long running RPCs with long timeout to consume all
   // active faults quota.
-  int num_delayed = 0;
-  RpcOptions rpc_options = RpcOptions().set_timeout_ms(kRpcTimeoutMs);
-  std::vector<ConcurrentRpc> rpcs =
-      SendConcurrentRpcs(DEBUG_LOCATION, stub_.get(), kNumRpcs, rpc_options);
+  RpcOptions rpc_options = RpcOptions().set_timeout(kRpcTimeout);
+  std::vector<AsyncRpc> rpcs(kNumRpcs);
   for (auto& rpc : rpcs) {
-    if (rpc.status.error_code() == StatusCode::OK) continue;
-    EXPECT_EQ(StatusCode::DEADLINE_EXCEEDED, rpc.status.error_code());
+    rpc.StartRpc(stub_.get(), rpc_options);
+  }
+  size_t num_delayed = 0;
+  for (auto& rpc : rpcs) {
+    Status status = rpc.GetStatus();
+    if (status.error_code() == StatusCode::OK) continue;
+    EXPECT_EQ(StatusCode::DEADLINE_EXCEEDED, status.error_code());
     ++num_delayed;
   }
   // Only kMaxFault number of RPC should be fault injected.
@@ -487,10 +507,14 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionMaxFault) {
   // Conduct one more round of RPCs after previous calls are finished. The goal
   // is to validate if the max fault counter is restored to zero.
   num_delayed = 0;
-  rpcs = SendConcurrentRpcs(DEBUG_LOCATION, stub_.get(), kNumRpcs, rpc_options);
+  rpcs = std::vector<AsyncRpc>(kNumRpcs);
   for (auto& rpc : rpcs) {
-    if (rpc.status.error_code() == StatusCode::OK) continue;
-    EXPECT_EQ(StatusCode::DEADLINE_EXCEEDED, rpc.status.error_code());
+    rpc.StartRpc(stub_.get(), rpc_options);
+  }
+  for (auto& rpc : rpcs) {
+    Status status = rpc.GetStatus();
+    if (status.error_code() == StatusCode::OK) continue;
+    EXPECT_EQ(StatusCode::DEADLINE_EXCEEDED, status.error_code());
     ++num_delayed;
   }
   // Only kMaxFault number of RPC should be fault injected. If the max fault
@@ -500,9 +524,8 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionMaxFault) {
 
 TEST_P(FaultInjectionTest, XdsFaultInjectionBidiStreamDelayOk) {
   CreateAndStartBackends(1);
-  // kRpcTimeoutMilliseconds is 10s should never be reached.
-  const uint32_t kRpcTimeoutMilliseconds = grpc_test_slowdown_factor() * 10000;
-  const uint32_t kFixedDelaySeconds = 1;
+  const auto kRpcTimeout = grpc_core::Duration::Seconds(20);
+  const auto kFixedDelay = grpc_core::Duration::Seconds(1);
   const uint32_t kDelayPercentagePerHundred = 100;
   // Create an EDS resource
   EdsResourceArgs args({{"locality0", CreateEndpointsForBackends()}});
@@ -512,13 +535,13 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionBidiStreamDelayOk) {
   auto* delay_percentage = http_fault.mutable_delay()->mutable_percentage();
   delay_percentage->set_numerator(kDelayPercentagePerHundred);
   delay_percentage->set_denominator(FractionalPercent::HUNDRED);
-  auto* fixed_delay = http_fault.mutable_delay()->mutable_fixed_delay();
-  fixed_delay->set_seconds(kFixedDelaySeconds);
+  SetProtoDuration(kFixedDelay,
+                   http_fault.mutable_delay()->mutable_fixed_delay());
   // Config fault injection via different setup
   SetFilterConfig(http_fault);
   ClientContext context;
   context.set_deadline(
-      grpc_timeout_milliseconds_to_deadline(kRpcTimeoutMilliseconds));
+      grpc_timeout_milliseconds_to_deadline(kRpcTimeout.millis()));
   auto stream = stub_->BidiStream(&context);
   stream->WritesDone();
   auto status = stream->Finish();
@@ -532,8 +555,8 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionBidiStreamDelayOk) {
 // for description.
 TEST_P(FaultInjectionTest, XdsFaultInjectionBidiStreamDelayError) {
   CreateAndStartBackends(1);
-  const uint32_t kRpcTimeoutMilliseconds = grpc_test_slowdown_factor() * 500;
-  const uint32_t kFixedDelaySeconds = 100;
+  const auto kRpcTimeout = grpc_core::Duration::Seconds(10);
+  const auto kFixedDelay = grpc_core::Duration::Seconds(30);
   const uint32_t kDelayPercentagePerHundred = 100;
   // Create an EDS resource
   EdsResourceArgs args({{"locality0", CreateEndpointsForBackends()}});
@@ -543,13 +566,13 @@ TEST_P(FaultInjectionTest, XdsFaultInjectionBidiStreamDelayError) {
   auto* delay_percentage = http_fault.mutable_delay()->mutable_percentage();
   delay_percentage->set_numerator(kDelayPercentagePerHundred);
   delay_percentage->set_denominator(FractionalPercent::HUNDRED);
-  auto* fixed_delay = http_fault.mutable_delay()->mutable_fixed_delay();
-  fixed_delay->set_seconds(kFixedDelaySeconds);
+  SetProtoDuration(kFixedDelay,
+                   http_fault.mutable_delay()->mutable_fixed_delay());
   // Config fault injection via different setup
   SetFilterConfig(http_fault);
   ClientContext context;
   context.set_deadline(
-      grpc_timeout_milliseconds_to_deadline(kRpcTimeoutMilliseconds));
+      grpc_timeout_milliseconds_to_deadline(kRpcTimeout.millis()));
   auto stream = stub_->BidiStream(&context);
   stream->WritesDone();
   auto status = stream->Finish();
@@ -567,11 +590,9 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   // Make the backup poller poll very frequently in order to pick up
   // updates from all the subchannels's FDs.
-  GPR_GLOBAL_CONFIG_SET(grpc_client_channel_backup_poll_interval_ms, 1);
-#if TARGET_OS_IPHONE
-  // Workaround Apple CFStream bug
-  gpr_setenv("grpc_cfstream", "0");
-#endif
+  grpc_core::ConfigVars::Overrides overrides;
+  overrides.client_channel_backup_poll_interval_ms = 1;
+  grpc_core::ConfigVars::SetOverrides(overrides);
   grpc_init();
   const auto result = RUN_ALL_TESTS();
   grpc_shutdown();

@@ -1,29 +1,35 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
-#include <string.h>
-
+#include <grpc/byte_buffer.h>
 #include <grpc/grpc.h>
 #include <grpc/support/alloc.h>
+#include <grpc/support/time.h>
+#include <stdint.h>
+#include <string.h>
 
-#include "src/core/lib/surface/server.h"
+#include <algorithm>
+
+#include "src/core/util/grpc_check.h"
 #include "test/core/bad_client/bad_client.h"
 #include "test/core/end2end/cq_verifier.h"
+#include "test/core/test_util/test_config.h"
+#include "gtest/gtest.h"
 
 static const char prefix[] =
     "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
@@ -45,7 +51,7 @@ static const char prefix[] =
     // data frame for stream 1: advertise a 10000 byte payload (that we won't
     // fulfill)
     "\x00\x00\x05\x00\x00\x00\x00\x00\x01"
-    "\x01\x00\x00\x27\x10"
+    "\x00\x00\x00\x27\x10"
     // stream 3 headers: generated from server_registered_method.headers in this
     // directory
     "\x00\x00\xd0\x01\x04\x00\x00\x00\x03"
@@ -62,35 +68,32 @@ static const char prefix[] =
     // data frame for stream 3: advertise a 10000 byte payload (that we will
     // fulfill)
     "\x00\x00\x05\x00\x00\x00\x00\x00\x03"
-    "\x01\x00\x00\x27\x10"
+    "\x00\x00\x00\x27\x10"
     "";
-
-static void* tag(intptr_t t) { return reinterpret_cast<void*>(t); }
 
 static void verifier(grpc_server* server, grpc_completion_queue* cq,
                      void* registered_method) {
   grpc_call_error error;
   grpc_call* s;
-  cq_verifier* cqv = cq_verifier_create(cq);
+  grpc_core::CqVerifier cqv(cq);
   grpc_metadata_array request_metadata_recv;
   gpr_timespec deadline;
   grpc_byte_buffer* payload = nullptr;
 
   grpc_metadata_array_init(&request_metadata_recv);
 
-  error = grpc_server_request_registered_call(server, registered_method, &s,
-                                              &deadline, &request_metadata_recv,
-                                              &payload, cq, cq, tag(101));
-  GPR_ASSERT(GRPC_CALL_OK == error);
-  CQ_EXPECT_COMPLETION(cqv, tag(101), 1);
-  cq_verify(cqv);
+  error = grpc_server_request_registered_call(
+      server, registered_method, &s, &deadline, &request_metadata_recv,
+      &payload, cq, cq, grpc_core::CqVerifier::tag(101));
+  GRPC_CHECK_EQ(error, GRPC_CALL_OK);
+  cqv.Expect(grpc_core::CqVerifier::tag(101), true);
+  cqv.Verify();
 
-  GPR_ASSERT(payload != nullptr);
+  GRPC_CHECK_NE(payload, nullptr);
 
   grpc_metadata_array_destroy(&request_metadata_recv);
   grpc_call_unref(s);
   grpc_byte_buffer_destroy(payload);
-  cq_verifier_destroy(cqv);
 }
 
 char* g_buffer;
@@ -109,6 +112,7 @@ static void addbuf(const void* data, size_t len) {
 int main(int argc, char** argv) {
   int i;
   grpc::testing::TestEnvironment env(&argc, argv);
+  ::testing::InitGoogleTest(&argc, argv);
   grpc_init();
 
 #define NUM_FRAMES 10

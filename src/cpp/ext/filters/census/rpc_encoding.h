@@ -1,35 +1,33 @@
-/*
- *
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2018 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
-#ifndef GRPC_INTERNAL_CPP_EXT_FILTERS_CENSUS_RPC_ENCODING_H
-#define GRPC_INTERNAL_CPP_EXT_FILTERS_CENSUS_RPC_ENCODING_H
+#ifndef GRPC_SRC_CPP_EXT_FILTERS_CENSUS_RPC_ENCODING_H
+#define GRPC_SRC_CPP_EXT_FILTERS_CENSUS_RPC_ENCODING_H
 
 #include <grpc/support/port_platform.h>
-
+#include <stdint.h>
 #include <string.h>
 
-#include "absl/base/internal/endian.h"
+#include "absl/numeric/bits.h"
 #include "absl/strings/string_view.h"
-#include "opencensus/trace/span_context.h"
-#include "opencensus/trace/span_id.h"
-#include "opencensus/trace/trace_id.h"
 
 namespace grpc {
+namespace internal {
 
 // TODO(unknown): This may not be needed. Check to see if opencensus requires
 // a trailing server response.
@@ -60,8 +58,15 @@ class RpcServerStatsEncoding {
       *time = 0;
       return kEncodeDecodeFailure;
     }
-    *time = absl::little_endian::Load64(
-        &buf[kServerElapsedTimeOffset + kFieldIdSize]);
+    uint64_t little_endian_time;
+    memcpy(reinterpret_cast<void*>(&little_endian_time),
+           &buf[kServerElapsedTimeOffset + kFieldIdSize],
+           kServerElapsedTimeSize);
+    if constexpr (absl::endian::native == absl::endian::little) {
+      *time = little_endian_time;
+    } else {
+      *time = absl::byteswap(little_endian_time);
+    }
     return kRpcServerStatsSize;
   }
 
@@ -76,8 +81,15 @@ class RpcServerStatsEncoding {
 
     buf[kVersionIdOffset] = kVersionId;
     buf[kServerElapsedTimeOffset] = kServerElapsedTimeField;
-    absl::little_endian::Store64(&buf[kServerElapsedTimeOffset + kFieldIdSize],
-                                 time);
+    uint64_t little_endian_time;
+    if constexpr (absl::endian::native == absl::endian::little) {
+      little_endian_time = time;
+    } else {
+      little_endian_time = absl::byteswap(time);
+    }
+    memcpy(&buf[kServerElapsedTimeOffset + kFieldIdSize],
+           reinterpret_cast<void*>(&little_endian_time),
+           kServerElapsedTimeSize);
     return kRpcServerStatsSize;
   }
 
@@ -110,6 +122,7 @@ class RpcServerStatsEncoding {
   RpcServerStatsEncoding operator=(RpcServerStatsEncoding&&) = delete;
 };
 
+}  // namespace internal
 }  // namespace grpc
 
-#endif /* GRPC_INTERNAL_CPP_EXT_FILTERS_CENSUS_RPC_ENCODING_H */
+#endif  // GRPC_SRC_CPP_EXT_FILTERS_CENSUS_RPC_ENCODING_H

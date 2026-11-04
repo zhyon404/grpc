@@ -22,8 +22,7 @@ logging.basicConfig()
 _LOGGER = logging.getLogger(__name__)
 
 
-class Rpc(object):
-
+class Rpc:
     def __init__(self, handler, invocation_metadata):
         self._condition = threading.Condition()
         self._handler = handler
@@ -50,7 +49,7 @@ class Rpc(object):
                 try:
                     callback()
                 except Exception:  # pylint: disable=broad-except
-                    _LOGGER.exception('Exception calling server-side callback!')
+                    _LOGGER.exception("Exception calling server-side callback!")
 
         callback_calling_thread = threading.Thread(target=call_back)
         callback_calling_thread.start()
@@ -67,11 +66,12 @@ class Rpc(object):
             trailing_metadata = _common.FUSSED_EMPTY_METADATA
         else:
             trailing_metadata = self._pending_trailing_metadata
-        if self._pending_code is None:
-            code = grpc.StatusCode.OK
-        else:
-            code = self._pending_code
-        details = '' if self._pending_details is None else self._pending_details
+        code = (
+            self._pending_code
+            if self._pending_code is not None
+            else grpc.StatusCode.OK
+        )
+        details = "" if self._pending_details is None else self._pending_details
         self._terminate(trailing_metadata, code, details)
 
     def _abort(self, code, details):
@@ -83,16 +83,19 @@ class Rpc(object):
 
     def application_cancel(self):
         with self._condition:
-            self._abort(grpc.StatusCode.CANCELLED,
-                        'Cancelled by server-side application!')
+            self._abort(
+                grpc.StatusCode.CANCELLED,
+                "Cancelled by server-side application!",
+            )
 
     def application_exception_abort(self, exception):
         with self._condition:
             if exception not in self._rpc_errors:
-                _LOGGER.exception('Exception calling application!')
+                _LOGGER.exception("Exception calling application!")
                 self._abort(
                     grpc.StatusCode.UNKNOWN,
-                    'Exception calling application: {}'.format(exception))
+                    "Exception calling application: {}".format(exception),
+                )
 
     def extrinsic_abort(self):
         with self._condition:
@@ -121,10 +124,9 @@ class Rpc(object):
         with self._condition:
             if self._initial_metadata_sent:
                 return False
-            else:
-                self._handler.send_initial_metadata(initial_metadata)
-                self._initial_metadata_sent = True
-                return True
+            self._handler.send_initial_metadata(initial_metadata)
+            self._initial_metadata_sent = True
+            return True
 
     def is_active(self):
         with self._condition:
@@ -134,9 +136,8 @@ class Rpc(object):
         with self._condition:
             if self._callbacks is None:
                 return False
-            else:
-                self._callbacks.append(callback)
-                return True
+            self._callbacks.append(callback)
+            return True
 
     def invocation_metadata(self):
         with self._condition:

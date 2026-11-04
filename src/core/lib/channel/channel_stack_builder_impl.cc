@@ -1,71 +1,68 @@
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <grpc/support/port_platform.h>
+//
+//
+// Copyright 2016 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "src/core/lib/channel/channel_stack_builder_impl.h"
 
+#include <grpc/support/alloc.h>
+#include <grpc/support/port_platform.h>
 #include <string.h>
 
+#include <algorithm>
+#include <functional>
+#include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
-#include "absl/status/status.h"
-
-#include <grpc/impl/codegen/grpc_types.h>
-#include <grpc/support/alloc.h>
-
-#include "src/core/lib/channel/channel_args.h"
+#include "src/core/call/metadata_batch.h"
+#include "src/core/lib/channel/channel_fwd.h"
 #include "src/core/lib/channel/channel_stack.h"
-#include "src/core/lib/gpr/useful.h"
+#include "src/core/lib/debug/trace.h"
+#include "src/core/lib/iomgr/closure.h"
 #include "src/core/lib/iomgr/error.h"
+#include "src/core/lib/promise/activity.h"
+#include "src/core/lib/promise/arena_promise.h"
+#include "src/core/lib/promise/poll.h"
+#include "src/core/lib/surface/channel_stack_type.h"
 #include "src/core/lib/transport/error_utils.h"
 #include "src/core/lib/transport/transport.h"
+#include "src/core/util/no_destruct.h"
+#include "src/core/util/sync.h"
+#include "absl/base/thread_annotations.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 
 namespace grpc_core {
 
 absl::StatusOr<RefCountedPtr<grpc_channel_stack>>
 ChannelStackBuilderImpl::Build() {
-  auto* stack = mutable_stack();
+  std::vector<FilterAndConfig> stack = this->stack();
 
   // calculate the size of the channel stack
-  size_t channel_stack_size =
-      grpc_channel_stack_size(stack->data(), stack->size());
+  size_t channel_stack_size = grpc_channel_stack_size(stack);
 
   // allocate memory
   auto* channel_stack =
       static_cast<grpc_channel_stack*>(gpr_zalloc(channel_stack_size));
-
-  ChannelArgs final_args = channel_args();
-  if (transport() != nullptr) {
-    static const grpc_arg_pointer_vtable vtable = {
-        // copy
-        [](void* p) { return p; },
-        // destroy
-        [](void*) {},
-        // cmp
-        [](void* a, void* b) { return QsortCompare(a, b); },
-    };
-    final_args = final_args.Set(GRPC_ARG_TRANSPORT,
-                                ChannelArgs::Pointer(transport(), &vtable));
-  }
+  channel_stack->type = this->channel_stack_type();
 
   // and initialize it
-  const grpc_channel_args* c_args = final_args.ToC();
   grpc_error_handle error = grpc_channel_stack_init(
       1,
       [](void* p, grpc_error_handle) {
@@ -73,20 +70,16 @@ ChannelStackBuilderImpl::Build() {
         grpc_channel_stack_destroy(stk);
         gpr_free(stk);
       },
-      channel_stack, stack->data(), stack->size(), c_args, name(),
-      channel_stack);
-  grpc_channel_args_destroy(c_args);
+      channel_stack, stack, channel_args(), name(), channel_stack);
 
-  if (error != GRPC_ERROR_NONE) {
+  if (!error.ok()) {
     grpc_channel_stack_destroy(channel_stack);
     gpr_free(channel_stack);
-    auto status = grpc_error_to_absl_status(error);
-    GRPC_ERROR_UNREF(error);
-    return status;
+    return error;
   }
 
   // run post-initialization functions
-  for (size_t i = 0; i < stack->size(); i++) {
+  for (size_t i = 0; i < stack.size(); i++) {
     auto* elem = grpc_channel_stack_element(channel_stack, i);
     elem->filter->post_init_channel_elem(channel_stack, elem);
   }

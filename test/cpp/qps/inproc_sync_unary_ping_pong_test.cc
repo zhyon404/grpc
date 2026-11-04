@@ -1,32 +1,33 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
+#include <optional>
 #include <set>
 
-#include <grpc/support/log.h>
-
-#include "test/core/util/test_config.h"
+#include "src/core/util/crash.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/qps/benchmark_config.h"
 #include "test/cpp/qps/driver.h"
 #include "test/cpp/qps/report.h"
 #include "test/cpp/qps/server.h"
 #include "test/cpp/util/test_config.h"
 #include "test/cpp/util/test_credentials_provider.h"
+#include "absl/log/log.h"
 
 namespace grpc {
 namespace testing {
@@ -35,7 +36,7 @@ static const int WARMUP = 1;
 static const int BENCHMARK = 3;
 
 static void RunSynchronousUnaryPingPong() {
-  gpr_log(GPR_INFO, "Running Synchronous Unary Ping Pong");
+  LOG(INFO) << "Running Synchronous Unary Ping Pong";
 
   ClientConfig client_config;
   client_config.set_client_type(SYNC_CLIENT);
@@ -47,9 +48,15 @@ static void RunSynchronousUnaryPingPong() {
   ServerConfig server_config;
   server_config.set_server_type(SYNC_SERVER);
 
-  const auto result =
-      RunScenario(client_config, 1, server_config, 1, WARMUP, BENCHMARK, -2, "",
-                  kInsecureCredentialsType, {}, true, 0);
+  RunScenarioOptions options(client_config, server_config);
+  options.set_num_clients(1)
+      .set_num_servers(1)
+      .set_warmup_seconds(WARMUP)
+      .set_benchmark_seconds(BENCHMARK)
+      .set_spawn_local_worker_count(-2)
+      .set_run_inproc(true);
+
+  const auto result = RunScenario(options);
 
   GetReporter()->ReportQPS(*result);
   GetReporter()->ReportLatency(*result);

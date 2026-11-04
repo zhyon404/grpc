@@ -1,4 +1,4 @@
-# Copyright 2021 gRPC authors.
+# Copyright 2026 gRPC authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,53 +12,56 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM gcc:11
+FROM ubuntu:22.04
 
-RUN apt-get update && apt-get install -y curl git time wget zip && apt-get clean
+RUN apt-get update && apt-get install -y build-essential ccache curl git time zip && apt-get clean
+#=================
+# Setup git to access working directory across docker boundary.
+# This avoids the "fatal: detected dubious ownership in repository XYZ"
+# git error.
+
+RUN git config --global --add safe.directory '*'
+RUN git config --global protocol.file.allow always
+
 #====================
 # run_tests.py python dependencies
 
 # Basic python dependencies to be able to run tools/run_tests python scripts
-# These dependencies are not sufficient to build gRPC Python, gRPC Python
-# deps are defined elsewhere (e.g. python_deps.include)
+# These dependencies are NOT for building gRPC Python, which are defined
+# elsewhere (requirements.txt, individual docker images, build scripts, etc).
 RUN apt-get update && apt-get install -y \
   python3 \
   python3-pip \
-  python3-setuptools \
-  python3-yaml \
+  python3-venv \
   && apt-get clean
 
-# use pinned version of pip to avoid sudden breakages
-RUN python3 -m pip install --upgrade pip==19.3.1
+# Use system python to bootstrap virtualenv and activate it
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-# TODO(jtattermusch): currently six is needed for tools/run_tests scripts
-# but since our python2 usage is deprecated, we should get rid of it.
-RUN python3 -m pip install six==1.16.0
+# Persist this to /etc/profile.d because some of our tests
+# (e.g. tools/run_tests/dockerize/build_and_run_docker.sh)
+# use `bash -l` to launch tests and override Dockerfile's
+# ENV directives.
+RUN echo "export PATH=\"$VIRTUAL_ENV/bin:\$PATH\"" > /etc/profile.d/venv.sh
+
+# Install/upgrade basic requirements inside the virtualenv
+RUN pip install --upgrade pip setuptools pyyaml
 
 # Google Cloud Platform API libraries
 # These are needed for uploading test results to BigQuery (e.g. by tools/run_tests scripts)
 RUN python3 -m pip install --upgrade google-auth==1.23.0 google-api-python-client==1.12.8 oauth2client==4.1.0
 
 
+# Some cxx tests depend on the twisted package
+RUN python3 -m pip install twisted
+
 #=================
 # Install cmake
 # Note that this step should be only used for distributions that have new enough cmake to satisfy gRPC's cmake version requirement.
 
 RUN apt-get update && apt-get install -y cmake && apt-get clean
-
-#=================
-# Install ccache
-
-# Install ccache from source since ccache 3.x packaged with most linux distributions
-# does not support Redis backend for caching.
-RUN curl -sSL -o ccache.tar.gz https://github.com/ccache/ccache/releases/download/v4.5.1/ccache-4.5.1.tar.gz \
-    && tar -zxf ccache.tar.gz \
-    && cd ccache-4.5.1 \
-    && mkdir build && cd build \
-    && cmake -DCMAKE_BUILD_TYPE=Release -DZSTD_FROM_INTERNET=ON -DHIREDIS_FROM_INTERNET=ON .. \
-    && make -j4 && make install \
-    && cd ../.. \
-    && rm -rf ccache-4.5.1 ccache.tar.gz
 
 
 RUN mkdir /var/local/jenkins

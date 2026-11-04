@@ -21,14 +21,8 @@ cdef float _POLL_AWAKE_INTERVAL_S = 0.2
 # loop.add_reader method.
 cdef bint _has_fd_monitoring = True
 
-IF UNAME_SYSNAME == "Windows":
-    cdef void _unified_socket_write(int fd) nogil:
-        win_socket_send(<WIN_SOCKET>fd, b"1", 1, 0)
-ELSE:
-    from posix cimport unistd
-
-    cdef void _unified_socket_write(int fd) nogil:
-        unistd.write(fd, b"1", 1)
+cdef void _unified_socket_write(int fd) noexcept nogil:
+    _unified_socket_write_impl(fd)
 
 
 def _handle_callback_wrapper(CallbackWrapper callback_wrapper, int success):
@@ -53,7 +47,7 @@ cdef class _BoundEventLoop:
         )
         # NOTE(lidiz) There isn't a way to cleanly pre-check if fd monitoring
         # support is available or not. Checking the event loop policy is not
-        # good enough. The application can has its own loop implementation, or
+        # good enough. The application can have its own loop implementation, or
         # uses different types of event loops (e.g., 1 Proactor, 3 Selectors).
         if _has_fd_monitoring:
             try:
@@ -73,7 +67,7 @@ cdef class PollerCompletionQueue(BaseCompletionQueue):
 
     def __cinit__(self):
         self._cq = grpc_completion_queue_create_for_next(NULL)
-        self._shutdown = False
+        self._shutdown.store(False)
         self._poller_thread = threading.Thread(target=self._poll_wrapper, daemon=True)
         self._poller_thread.start()
 
@@ -94,11 +88,11 @@ cdef class PollerCompletionQueue(BaseCompletionQueue):
         else:
             self._loops[loop] = _BoundEventLoop(loop, self._read_socket, self._handle_events)
 
-    cdef void _poll(self) nogil:
+    cdef int _poll(self) except -1 nogil:
         cdef grpc_event event
         cdef CallbackContext *context
 
-        while not self._shutdown:
+        while not self._shutdown.load():
             event = grpc_completion_queue_next(self._cq,
                                                _GPR_INF_FUTURE,
                                                NULL)
@@ -107,7 +101,8 @@ cdef class PollerCompletionQueue(BaseCompletionQueue):
                 with gil:
                     raise AssertionError("Core should not return GRPC_QUEUE_TIMEOUT!")
             elif event.type == GRPC_QUEUE_SHUTDOWN:
-                self._shutdown = True
+                self._shutdown.store(True)
+                break
             else:
                 self._queue_mutex.lock()
                 self._queue.push(event)
@@ -117,9 +112,10 @@ cdef class PollerCompletionQueue(BaseCompletionQueue):
                 else:
                     with gil:
                         # Event loops can be paused or killed at any time. So,
-                        # instead of deligate to any thread, the polling thread
+                        # instead of delegate to any thread, the polling thread
                         # should handle the distribution of the event.
                         self._handle_events(None)
+        return 0
 
     def _poll_wrapper(self):
         with nogil:
@@ -130,21 +126,33 @@ cdef class PollerCompletionQueue(BaseCompletionQueue):
         for loop in self._loops:
             self._loops.get(loop).close()
 
+        # Close the read socket to prevent the `_poller_thread` from blocking on a `write` syscall
+        # when the Unix-domain socket buffer is full. Once the loops above are closed, the read
+        # socket is no longer being read, so close it to avoid `write` syscall hangs.
+        #
+        # See `sock_alloc_send_pskb` for more details about these `write` syscall hangs.
+        self._read_socket.close()
+
         # TODO(https://github.com/grpc/grpc/issues/22365) perform graceful shutdown
         grpc_completion_queue_shutdown(self._cq)
-        while not self._shutdown:
+        while not self._shutdown.load():
             self._poller_thread.join(timeout=_POLL_AWAKE_INTERVAL_S)
         grpc_completion_queue_destroy(self._cq)
 
-        # Clean up socket resources
-        self._read_socket.close()
+        # Clean up the write socket
         self._write_socket.close()
 
     def _handle_events(self, object context_loop):
         cdef bytes data
         if _has_fd_monitoring:
             # If fd monitoring is working, clean the socket without blocking.
-            data = self._read_socket.recv(1)
+            try:
+                # In case of multiple loops, the read socket might be read by multiple threads.
+                # But only one of them will read the 1 byte sent by the poller thread.
+                # So, we need to handle the case where the socket is already empty.
+                data = self._read_socket.recv(1)
+            except BlockingIOError:
+                pass
         cdef grpc_event event
         cdef CallbackContext *context
 

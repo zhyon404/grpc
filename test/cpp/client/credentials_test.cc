@@ -1,42 +1,50 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <memory>
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <grpc/grpc.h>
+#include <grpc/grpc_crl_provider.h>
 #include <grpc/grpc_security.h>
+#include <grpc/support/string_util.h>
 #include <grpcpp/security/credentials.h>
 #include <grpcpp/security/server_credentials.h>
+#include <grpcpp/security/tls_certificate_provider.h>
 #include <grpcpp/security/tls_credentials_options.h>
 #include <grpcpp/server_builder.h>
 
-#include "src/core/lib/gpr/env.h"
-#include "src/core/lib/gpr/tmpfile.h"
+#include <cstddef>
+#include <memory>
+
+#include "src/core/lib/iomgr/exec_ctx.h"
+#include "src/core/util/env.h"
+#include "src/core/util/grpc_check.h"
+#include "src/core/util/http_client/httpcli.h"
+#include "src/core/util/tmpfile.h"
+#include "src/core/util/uri.h"
 #include "src/cpp/client/secure_credentials.h"
+#include "test/core/test_util/tls_utils.h"
 #include "test/cpp/util/tls_test_utils.h"
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 
 #define CA_CERT_PATH "src/core/tsi/test_creds/ca.pem"
 #define SERVER_CERT_PATH "src/core/tsi/test_creds/server1.pem"
 #define SERVER_KEY_PATH "src/core/tsi/test_creds/server1.key"
-#define CRL_DIR_PATH "test/core/tsi/test_creds/crl_data"
+#define CRL_DIR_PATH "test/core/tsi/test_creds/crl_data/crls"
 
 namespace {
 
@@ -46,10 +54,35 @@ constexpr const char* kIdentityCertName = "identity_cert_name";
 constexpr const char* kIdentityCertPrivateKey = "identity_private_key";
 constexpr const char* kIdentityCertContents = "identity_cert_contents";
 
+using ::grpc::experimental::CreateStaticCrlProvider;
 using ::grpc::experimental::ExternalCertificateVerifier;
 using ::grpc::experimental::FileWatcherCertificateProvider;
 using ::grpc::experimental::HostNameCertificateVerifier;
+using ::grpc::experimental::InMemoryCertificateProvider;
+using ::grpc::experimental::NoOpCertificateVerifier;
 using ::grpc::experimental::StaticDataCertificateProvider;
+using ::grpc::experimental::TlsChannelCredentialsOptions;
+using ::grpc::experimental::TlsCredentialsOptions;
+using ::grpc_core::testing::GetFileContents;
+
+int MockSuccessfulMetadataServiceResponse(const grpc_http_request* /*request*/,
+                                          const grpc_core::URI& /*uri*/,
+                                          grpc_core::Timestamp /*deadline*/,
+                                          grpc_closure* on_done,
+                                          grpc_http_response* response) {
+  *response = {};
+  response->status = 200;
+  response->body = gpr_strdup("");
+  response->body_length = 0;
+  grpc_http_header* headers =
+      static_cast<grpc_http_header*>(gpr_malloc(sizeof(*headers) * 1));
+  headers[0].key = gpr_strdup("Metadata-Flavor");
+  headers[0].value = gpr_strdup("Google");
+  response->hdr_count = 1;
+  response->hdrs = headers;
+  grpc_core::ExecCtx::Run(DEBUG_LOCATION, on_done, absl::OkStatus());
+  return 1;
+}
 
 }  // namespace
 
@@ -63,7 +96,24 @@ TEST(CredentialsTest, InvalidGoogleRefreshToken) {
 }
 
 TEST(CredentialsTest, DefaultCredentials) {
+  // Simulate a successful detection of metadata server.
+  grpc_core::HttpRequest::SetOverride(MockSuccessfulMetadataServiceResponse,
+                                      nullptr, nullptr);
   auto creds = GoogleDefaultCredentials();
+  // Reset the override to default.
+  grpc_core::HttpRequest::SetOverride(nullptr, nullptr, nullptr);
+}
+
+TEST(CredentialsTest, DefaultCredentialsWithAlts) {
+  // Simulate a successful detection of metadata server.
+  grpc_core::HttpRequest::SetOverride(MockSuccessfulMetadataServiceResponse,
+                                      nullptr, nullptr);
+  GoogleDefaultCredentialsOptions options = {};
+  options.use_alts_call_credentials = true;
+  auto creds = GoogleDefaultCredentials(options);
+  EXPECT_NE(creds, nullptr);
+  // Reset the override to default.
+  grpc_core::HttpRequest::SetOverride(nullptr, nullptr, nullptr);
 }
 
 TEST(CredentialsTest, ExternalAccountCredentials) {
@@ -102,8 +152,9 @@ TEST(CredentialsTest, ExternalAccountCredentials) {
       "url\":\"service_account_impersonation_url\",\"token_url\":\"https://"
       "foo.com:5555/token\",\"token_info_url\":\"https://foo.com:5555/"
       "token_info\",\"credential_source\":{\"environment_id\":\"aws1\","
-      "\"region_url\":\"https://foo.com:5555/region_url\",\"url\":\"https://"
-      "foo.com:5555/url\",\"regional_cred_verification_url\":\"https://"
+      "\"region_url\":\"https://169.254.169.254:5555/"
+      "region_url\",\"url\":\"https://"
+      "169.254.169.254:5555/url\",\"regional_cred_verification_url\":\"https://"
       "foo.com:5555/regional_cred_verification_url_{region}\"},"
       "\"quota_project_id\":\"quota_"
       "project_id\",\"client_id\":\"client_id\",\"client_secret\":\"client_"
@@ -228,7 +279,7 @@ TEST(CredentialsTest, StsCredentialsOptionsJson) {
 
 TEST(CredentialsTest, StsCredentialsOptionsFromEnv) {
   // Unset env and check expected failure.
-  gpr_unsetenv("STS_CREDENTIALS");
+  grpc_core::UnsetEnv("STS_CREDENTIALS");
   grpc::experimental::StsCredentialsOptions options;
   auto status = grpc::experimental::StsCredentialsOptionsFromEnv(&options);
   EXPECT_EQ(grpc::StatusCode::NOT_FOUND, status.error_code());
@@ -244,10 +295,10 @@ TEST(CredentialsTest, StsCredentialsOptionsFromEnv) {
   FILE* creds_file = gpr_tmpfile("sts_creds_options", &creds_file_name);
   ASSERT_NE(creds_file_name, nullptr);
   ASSERT_NE(creds_file, nullptr);
-  ASSERT_EQ(sizeof(valid_json),
-            fwrite(valid_json, 1, sizeof(valid_json), creds_file));
+  ASSERT_EQ(sizeof(valid_json) - 1,
+            fwrite(valid_json, 1, sizeof(valid_json) - 1, creds_file));
   fclose(creds_file);
-  gpr_setenv("STS_CREDENTIALS", creds_file_name);
+  grpc_core::SetEnv("STS_CREDENTIALS", creds_file_name);
   gpr_free(creds_file_name);
   status = grpc::experimental::StsCredentialsOptionsFromEnv(&options);
   EXPECT_TRUE(status.ok());
@@ -262,14 +313,28 @@ TEST(CredentialsTest, StsCredentialsOptionsFromEnv) {
   EXPECT_EQ(options.actor_token_type, "");
 
   // Cleanup.
-  gpr_unsetenv("STS_CREDENTIALS");
+  grpc_core::UnsetEnv("STS_CREDENTIALS");
 }
 
 TEST(CredentialsTest, TlsChannelCredentialsWithDefaultRootsAndDefaultVerifier) {
   grpc::experimental::TlsChannelCredentialsOptions options;
   options.set_verify_server_certs(true);
   auto channel_credentials = grpc::experimental::TlsCredentials(options);
-  GPR_ASSERT(channel_credentials.get() != nullptr);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
+}
+
+TEST(CredentialsTest, TlsChannelCredentialsWithDefaultRootsAndEmptySni) {
+  grpc::experimental::TlsChannelCredentialsOptions options;
+  options.set_sni_override("");
+  auto channel_credentials = grpc::experimental::TlsCredentials(options);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
+}
+
+TEST(CredentialsTest, TlsChannelCredentialsWithDefaultRootsAndSni) {
+  grpc::experimental::TlsChannelCredentialsOptions options;
+  options.set_sni_override("test");
+  auto channel_credentials = grpc::experimental::TlsCredentials(options);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
 }
 
 TEST(
@@ -289,21 +354,21 @@ TEST(
   options.watch_identity_key_cert_pairs();
   options.set_identity_cert_name(kIdentityCertName);
   auto channel_credentials = grpc::experimental::TlsCredentials(options);
-  GPR_ASSERT(channel_credentials.get() != nullptr);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
 }
 
 TEST(CredentialsTest,
      TlsChannelCredentialsWithStaticDataCertificateProviderLoadingRootOnly) {
   auto certificate_provider =
       std::make_shared<StaticDataCertificateProvider>(kRootCertContents);
-  GPR_ASSERT(certificate_provider != nullptr);
-  GPR_ASSERT(certificate_provider->c_provider() != nullptr);
+  GRPC_CHECK_NE(certificate_provider, nullptr);
+  GRPC_CHECK_NE(certificate_provider->c_provider(), nullptr);
   grpc::experimental::TlsChannelCredentialsOptions options;
   options.set_certificate_provider(certificate_provider);
   options.watch_root_certs();
   options.set_root_cert_name(kRootCertName);
   auto channel_credentials = grpc::experimental::TlsCredentials(options);
-  GPR_ASSERT(channel_credentials.get() != nullptr);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
 }
 
 TEST(
@@ -321,7 +386,7 @@ TEST(
   options.watch_identity_key_cert_pairs();
   options.set_identity_cert_name(kIdentityCertName);
   auto channel_credentials = grpc::experimental::TlsCredentials(options);
-  GPR_ASSERT(channel_credentials.get() != nullptr);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
 }
 
 TEST(
@@ -336,7 +401,7 @@ TEST(
   options.watch_identity_key_cert_pairs();
   options.set_identity_cert_name(kIdentityCertName);
   auto channel_credentials = grpc::experimental::TlsCredentials(options);
-  GPR_ASSERT(channel_credentials.get() != nullptr);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
 }
 
 TEST(CredentialsTest,
@@ -348,7 +413,7 @@ TEST(CredentialsTest,
   options.watch_root_certs();
   options.set_root_cert_name(kRootCertName);
   auto channel_credentials = grpc::experimental::TlsCredentials(options);
-  GPR_ASSERT(channel_credentials.get() != nullptr);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
 }
 
 TEST(CredentialsTest, TlsChannelCredentialsWithHostNameVerifier) {
@@ -357,7 +422,7 @@ TEST(CredentialsTest, TlsChannelCredentialsWithHostNameVerifier) {
   options.set_verify_server_certs(true);
   options.set_certificate_verifier(verifier);
   auto channel_credentials = grpc::experimental::TlsCredentials(options);
-  GPR_ASSERT(channel_credentials.get() != nullptr);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
 }
 
 TEST(CredentialsTest, TlsChannelCredentialsWithSyncExternalVerifier) {
@@ -368,7 +433,7 @@ TEST(CredentialsTest, TlsChannelCredentialsWithSyncExternalVerifier) {
   options.set_certificate_verifier(verifier);
   options.set_check_call_host(false);
   auto channel_credentials = grpc::experimental::TlsCredentials(options);
-  GPR_ASSERT(channel_credentials.get() != nullptr);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
 }
 
 TEST(CredentialsTest, TlsChannelCredentialsWithAsyncExternalVerifier) {
@@ -379,7 +444,7 @@ TEST(CredentialsTest, TlsChannelCredentialsWithAsyncExternalVerifier) {
   options.set_certificate_verifier(verifier);
   options.set_check_call_host(false);
   auto channel_credentials = grpc::experimental::TlsCredentials(options);
-  GPR_ASSERT(channel_credentials.get() != nullptr);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
 }
 
 TEST(CredentialsTest, TlsChannelCredentialsWithCrlDirectory) {
@@ -393,7 +458,151 @@ TEST(CredentialsTest, TlsChannelCredentialsWithCrlDirectory) {
   options.set_identity_cert_name(kIdentityCertName);
   options.set_crl_directory(CRL_DIR_PATH);
   auto channel_credentials = grpc::experimental::TlsCredentials(options);
-  GPR_ASSERT(channel_credentials.get() != nullptr);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
+}
+
+TEST(CredentialsTest, TlsChannelCredentialsWithCrlProvider) {
+  auto provider = experimental::CreateStaticCrlProvider({});
+  ASSERT_TRUE(provider.ok());
+  grpc::experimental::TlsChannelCredentialsOptions options;
+  options.set_crl_provider(*provider);
+  auto channel_credentials = grpc::experimental::TlsCredentials(options);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
+}
+
+TEST(CredentialsTest, TlsChannelCredentialsWithCrlProviderAndDirectory) {
+  auto provider = experimental::CreateStaticCrlProvider({});
+  ASSERT_TRUE(provider.ok());
+  grpc::experimental::TlsChannelCredentialsOptions options;
+  options.set_crl_directory(CRL_DIR_PATH);
+  options.set_crl_provider(*provider);
+  auto channel_credentials = grpc::experimental::TlsCredentials(options);
+  // TODO(gtcooke94) - behavior might change to make this return nullptr in the
+  // future
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
+}
+
+TEST(CredentialsTest, TlsCredentialsOptionsCopyConstructor) {
+  // define a class that grants access to the internal
+  // grpc_tls_credentials_options pointer
+  class TlsTestCredentialsOptions
+      : public grpc::experimental::TlsCredentialsOptions {
+   public:
+    grpc_tls_credentials_options* internal_cred_opts() {
+      return mutable_c_credentials_options();
+    }
+  };
+  TlsTestCredentialsOptions options;
+  TlsTestCredentialsOptions copied_options = options;
+
+  // Make sure the copy constructor cloned the internal pointer
+  GRPC_CHECK(options.internal_cred_opts() !=
+             copied_options.internal_cred_opts());
+}
+
+TEST(CredentialsTest, TlsCredentialsOptionsDoesNotLeak) {
+  TlsCredentialsOptions options;
+  (void)options;
+}
+
+TEST(CredentialsTest, MultipleOptionsOneCertificateProviderDoesNotLeak) {
+  auto provider = std::make_shared<StaticDataCertificateProvider>("root-pem");
+  TlsCredentialsOptions options_1;
+  options_1.set_certificate_provider(provider);
+  TlsCredentialsOptions options_2;
+  options_2.set_certificate_provider(provider);
+}
+
+TEST(CredentialsTest, MultipleOptionsOneCertificateVerifierDoesNotLeak) {
+  auto verifier = std::make_shared<NoOpCertificateVerifier>();
+  TlsCredentialsOptions options_1;
+  options_1.set_certificate_verifier(verifier);
+  TlsCredentialsOptions options_2;
+  options_2.set_certificate_verifier(verifier);
+}
+
+TEST(CredentialsTest, MultipleOptionsOneCrlProviderDoesNotLeak) {
+  auto crl_provider = CreateStaticCrlProvider(/*crls=*/{});
+  EXPECT_TRUE(crl_provider.ok());
+  TlsCredentialsOptions options_1;
+  options_1.set_crl_provider(*crl_provider);
+  TlsCredentialsOptions options_2;
+  options_2.set_crl_provider(*crl_provider);
+}
+
+TEST(CredentialsTest, TlsChannelCredentialsDoesNotLeak) {
+  TlsChannelCredentialsOptions options;
+  auto channel_creds = TlsCredentials(options);
+  EXPECT_NE(channel_creds, nullptr);
+}
+
+TEST(CredentialsTest, MultipleChannelCredentialsSameOptionsDoesNotLeak) {
+  TlsChannelCredentialsOptions options;
+  auto channel_creds_1 = TlsCredentials(options);
+  EXPECT_NE(channel_creds_1, nullptr);
+  auto channel_creds_2 = TlsCredentials(options);
+  EXPECT_NE(channel_creds_2, nullptr);
+}
+
+TEST(CredentialsTest,
+     MultipleChannelCredentialsOneCertificateProviderDoesNotLeak) {
+  TlsChannelCredentialsOptions options;
+  auto provider = std::make_shared<StaticDataCertificateProvider>("root-pem");
+  options.set_certificate_provider(provider);
+  auto channel_creds_1 = TlsCredentials(options);
+  EXPECT_NE(channel_creds_1, nullptr);
+  auto channel_creds_2 = TlsCredentials(options);
+  EXPECT_NE(channel_creds_2, nullptr);
+}
+
+TEST(CredentialsTest,
+     MultipleChannelCredentialsOneCertificateVerifierDoesNotLeak) {
+  TlsChannelCredentialsOptions options;
+  auto verifier = std::make_shared<NoOpCertificateVerifier>();
+  options.set_certificate_verifier(verifier);
+  auto channel_creds_1 = TlsCredentials(options);
+  EXPECT_NE(channel_creds_1, nullptr);
+  auto channel_creds_2 = TlsCredentials(options);
+  EXPECT_NE(channel_creds_2, nullptr);
+}
+
+TEST(CredentialsTest, TlsChannelCredentialsWithInMemoryCertificateProvider) {
+  auto certificate_provider = std::make_shared<InMemoryCertificateProvider>();
+  EXPECT_EQ(certificate_provider->UpdateRoot(GetFileContents(CA_CERT_PATH)),
+            absl::OkStatus());
+  grpc::experimental::TlsChannelCredentialsOptions options;
+  options.set_certificate_provider(certificate_provider);
+  options.watch_root_certs();
+  options.set_root_cert_name(kRootCertName);
+  auto channel_credentials = grpc::experimental::TlsCredentials(options);
+  GRPC_CHECK_NE(channel_credentials.get(), nullptr);
+}
+
+TEST(CredentialsTest, MultipleChannelCredentialsOneCrlProviderDoesNotLeak) {
+  TlsChannelCredentialsOptions options;
+  auto provider = CreateStaticCrlProvider(/*crls=*/{});
+  EXPECT_TRUE(provider.ok());
+  options.set_crl_provider(*provider);
+  auto channel_creds_1 = TlsCredentials(options);
+  EXPECT_NE(channel_creds_1, nullptr);
+  auto channel_creds_2 = TlsCredentials(options);
+  EXPECT_NE(channel_creds_2, nullptr);
+}
+
+TEST(CredentialsTest, TlsChannelCredentialsWithGoodMinAndMaxTlsVersions) {
+  grpc::experimental::TlsChannelCredentialsOptions options;
+  options.set_min_tls_version(grpc_tls_version::TLS1_2);
+  options.set_max_tls_version(grpc_tls_version::TLS1_3);
+  auto channel_credentials = grpc::experimental::TlsCredentials(options);
+  EXPECT_NE(channel_credentials, nullptr);
+}
+
+TEST(CredentialsTest, TlsChannelCredentialsWithBadMinAndMaxTlsVersions) {
+  grpc::experimental::TlsChannelCredentialsOptions options;
+  options.set_min_tls_version(grpc_tls_version::TLS1_3);
+  options.set_max_tls_version(grpc_tls_version::TLS1_2);
+  auto channel_credentials = grpc::experimental::TlsCredentials(options);
+  EXPECT_EQ(channel_credentials, nullptr);
 }
 
 }  // namespace

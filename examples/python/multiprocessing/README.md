@@ -69,6 +69,13 @@ Alternatively, generate code using the following and then run the client and ser
 directly:
 
 ```python
-cd examples/python/helloworld
+cd examples/python/multiprocessing
 python -m grpc_tools.protoc -I . prime.proto  --python_out=. --grpc_python_out=.
 ```
+
+#### Warning for MacOS
+Running on MacOS (Darwin), SO_REUSEPORT behavior on MacOS is different from
+Linux. On MacOS, SO_REUSEPORT does not provide true load balancing - all requests from
+the same connection will be handled by the same process, defeating the purpose of
+multiprocessing. This is the issue described in GitHub #40444. For true multiprocessing
+on MacOS, consider using multiple worker processes on different ports.

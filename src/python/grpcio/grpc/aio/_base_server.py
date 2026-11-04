@@ -14,11 +14,10 @@
 """Abstract base classes for server-side classes."""
 
 import abc
-from typing import Generic, Iterable, Mapping, Optional, Sequence
+from typing import Generic, Iterable, Mapping, NoReturn, Optional, Sequence
 
 import grpc
 
-from ._metadata import Metadata
 from ._typing import DoneCallbackType
 from ._typing import MetadataType
 from ._typing import RequestType
@@ -30,8 +29,8 @@ class Server(abc.ABC):
 
     @abc.abstractmethod
     def add_generic_rpc_handlers(
-            self,
-            generic_rpc_handlers: Sequence[grpc.GenericRpcHandler]) -> None:
+        self, generic_rpc_handlers: Sequence[grpc.GenericRpcHandler]
+    ) -> None:
         """Registers GenericRpcHandlers with this Server.
 
         This method is only safe to call before the server is started.
@@ -59,8 +58,9 @@ class Server(abc.ABC):
         """
 
     @abc.abstractmethod
-    def add_secure_port(self, address: str,
-                        server_credentials: grpc.ServerCredentials) -> int:
+    def add_secure_port(
+        self, address: str, server_credentials: grpc.ServerCredentials
+    ) -> int:
         """Opens a secure port for accepting RPCs.
 
         A port is a communication endpoint that used by networking protocols,
@@ -92,11 +92,12 @@ class Server(abc.ABC):
         This method immediately stops the server from servicing new RPCs in
         all cases.
 
-        If a grace period is specified, this method returns immediately and all
-        RPCs active at the end of the grace period are aborted. If a grace
-        period is not specified (by passing None for grace), all existing RPCs
-        are aborted immediately and this method blocks until the last RPC
-        handler terminates.
+        If a grace period is specified, this method waits until all active
+        RPCs are finished or until the grace period is reached. RPCs that haven't
+        been terminated within the grace period are aborted.
+        If a grace period is not specified (by passing None for grace), all
+        existing RPCs are aborted immediately and this method blocks until
+        the last RPC handler terminates.
 
         This method is idempotent and may be called at any time. Passing a
         smaller grace value in a subsequent call will have the effect of
@@ -110,8 +111,9 @@ class Server(abc.ABC):
         """
 
     @abc.abstractmethod
-    async def wait_for_termination(self,
-                                   timeout: Optional[float] = None) -> bool:
+    async def wait_for_termination(
+        self, timeout: Optional[float] = None
+    ) -> bool:
         """Continues current coroutine once the server stops.
 
         This is an EXPERIMENTAL API.
@@ -131,6 +133,22 @@ class Server(abc.ABC):
 
         Returns:
           A bool indicates if the operation times out.
+        """
+
+    # Suppressing pyright[reportUnknownParameterType, reportMissingParameterType]
+    # for type annotation of service_name and method_handlers as it will be
+    # taken up along with the sync stack changes.
+    def add_registered_method_handlers(  # noqa: B027
+        self, service_name, method_handlers  # pyright: ignore # noqa: PGH003
+    ) -> None:
+        """Registers GenericRpcHandlers with this Server.
+
+        This method is only safe to call before the server is started.
+
+        Args:
+          service_name: The service name.
+          method_handlers: A dictionary that maps method names to corresponding
+            RpcMethodHandler.
         """
 
 
@@ -162,8 +180,9 @@ class ServicerContext(Generic[RequestType, ResponseType], abc.ABC):
         """
 
     @abc.abstractmethod
-    async def send_initial_metadata(self,
-                                    initial_metadata: MetadataType) -> None:
+    async def send_initial_metadata(
+        self, initial_metadata: MetadataType
+    ) -> None:
         """Sends the initial metadata value to the client.
 
         This method need not be called by implementations if they have no
@@ -177,11 +196,12 @@ class ServicerContext(Generic[RequestType, ResponseType], abc.ABC):
     async def abort(
         self,
         code: grpc.StatusCode,
-        details: str = '',
-        trailing_metadata: MetadataType = tuple()) -> None:
+        details: str = "",
+        trailing_metadata: MetadataType = (),
+    ) -> NoReturn:
         """Raises an exception to terminate the RPC with a non-OK status.
 
-        The code and details passed as arguments will supercede any existing
+        The code and details passed as arguments will supersede any existing
         ones.
 
         Args:
@@ -196,6 +216,26 @@ class ServicerContext(Generic[RequestType, ResponseType], abc.ABC):
           Exception: An exception is always raised to signal the abortion the
             RPC to the gRPC runtime.
         """
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    async def abort_with_status(self, status: grpc.Status) -> NoReturn:
+        """Raises an exception to terminate the RPC with a non-OK status.
+
+        The status passed as argument will supersede any existing status code,
+        status message and trailing metadata.
+
+        This is an EXPERIMENTAL API.
+
+        Args:
+          status: A grpc.Status object. The status code in it must not be
+            StatusCode.OK.
+
+        Raises:
+          Exception: An exception is always raised to signal the abortion of the
+            RPC to the gRPC runtime.
+        """
+        raise NotImplementedError()
 
     @abc.abstractmethod
     def set_trailing_metadata(self, trailing_metadata: MetadataType) -> None:
@@ -209,7 +249,7 @@ class ServicerContext(Generic[RequestType, ResponseType], abc.ABC):
         """
 
     @abc.abstractmethod
-    def invocation_metadata(self) -> Optional[Metadata]:
+    def invocation_metadata(self) -> Optional[MetadataType]:
         """Accesses the metadata sent by the client.
 
         Returns:
@@ -243,8 +283,6 @@ class ServicerContext(Generic[RequestType, ResponseType], abc.ABC):
     def set_compression(self, compression: grpc.Compression) -> None:
         """Set the compression algorithm to be used for the entire call.
 
-        This is an EXPERIMENTAL method.
-
         Args:
           compression: An element of grpc.compression, e.g.
             grpc.compression.Gzip.
@@ -253,8 +291,6 @@ class ServicerContext(Generic[RequestType, ResponseType], abc.ABC):
     @abc.abstractmethod
     def disable_next_message_compression(self) -> None:
         """Disables compression for the next response message.
-
-        This is an EXPERIMENTAL method.
 
         This method will override any compression configuration set during
         server creation or set on the call.
@@ -309,8 +345,9 @@ class ServicerContext(Generic[RequestType, ResponseType], abc.ABC):
           remaining for the RPC to complete before it is considered to have
           timed out, or None if no deadline was specified for the RPC.
         """
+        raise NotImplementedError()
 
-    def trailing_metadata(self):
+    def trailing_metadata(self) -> MetadataType:
         """Access value to be used as trailing metadata upon RPC completion.
 
         This is an EXPERIMENTAL API.
@@ -320,7 +357,7 @@ class ServicerContext(Generic[RequestType, ResponseType], abc.ABC):
         """
         raise NotImplementedError()
 
-    def code(self):
+    def code(self) -> grpc.StatusCode:
         """Accesses the value to be used as status code upon RPC completion.
 
         This is an EXPERIMENTAL API.
@@ -330,7 +367,7 @@ class ServicerContext(Generic[RequestType, ResponseType], abc.ABC):
         """
         raise NotImplementedError()
 
-    def details(self):
+    def details(self):  # pyright: ignore[reportUnknownParameterType]
         """Accesses the value to be used as detail string upon RPC completion.
 
         This is an EXPERIMENTAL API.
@@ -360,6 +397,7 @@ class ServicerContext(Generic[RequestType, ResponseType], abc.ABC):
         Returns:
           A bool indicates whether the RPC is cancelled or not.
         """
+        raise NotImplementedError()
 
     def done(self) -> bool:
         """Return True if the RPC is done.
@@ -371,3 +409,4 @@ class ServicerContext(Generic[RequestType, ResponseType], abc.ABC):
         Returns:
           A bool indicates if the RPC is done.
         """
+        raise NotImplementedError()

@@ -109,6 +109,14 @@
   [_call cancel];
 }
 
+- (void)receiveNextMessage {
+  [_call receiveNextMessage];
+}
+
+- (void)receiveNextMessages:(NSUInteger)numberOfMessages {
+  [_call receiveNextMessages:numberOfMessages];
+}
+
 @end
 
 @interface GRPCStreamingProtoCall () <GRPCResponseHandler>
@@ -202,8 +210,16 @@
 }
 
 - (void)writeMessage:(GPBMessage *)message {
+  // TODO: Revert this #ifdef once Objective-C Protobuf is added as an SPM package dependency.
+#ifdef SWIFTPM_MODULE_BUNDLE
+  Class gpbMessageClass = NSClassFromString(@"GPBMessage");
+  NSAssert(!gpbMessageClass || [message isKindOfClass:gpbMessageClass],
+           @"Parameter message must be a GPBMessage");
+  if (gpbMessageClass && ![message isKindOfClass:gpbMessageClass]) {
+#else
   NSAssert([message isKindOfClass:[GPBMessage class]], @"Parameter message must be a GPBMessage");
   if (![message isKindOfClass:[GPBMessage class]]) {
+#endif
     NSLog(@"Failed to send a message that is non-proto.");
     return;
   }
@@ -219,7 +235,6 @@
   GRPCCall2 *copiedCall;
   @synchronized(self) {
     copiedCall = _call;
-    _call = nil;
   }
   [copiedCall finish];
 }

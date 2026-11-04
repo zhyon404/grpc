@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/lib/resource_quota/thread_quota.h"
 
-#include <grpc/support/log.h>
+#include <grpc/support/port_platform.h>
+
+#include "src/core/util/grpc_check.h"
 
 namespace grpc_core {
 
@@ -25,20 +25,20 @@ ThreadQuota::ThreadQuota() = default;
 ThreadQuota::~ThreadQuota() = default;
 
 void ThreadQuota::SetMax(size_t new_max) {
-  MutexLock lock(&mu_);
+  MutexLock lock(mu_);
   max_ = new_max;
 }
 
 bool ThreadQuota::Reserve(size_t num_threads) {
-  MutexLock lock(&mu_);
+  MutexLock lock(mu_);
   if (allocated_ + num_threads > max_) return false;
   allocated_ += num_threads;
   return true;
 }
 
 void ThreadQuota::Release(size_t num_threads) {
-  MutexLock lock(&mu_);
-  GPR_ASSERT(num_threads <= allocated_);
+  MutexLock lock(mu_);
+  GRPC_CHECK(num_threads <= allocated_);
   allocated_ -= num_threads;
 }
 

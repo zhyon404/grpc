@@ -29,6 +29,7 @@ cdef class RPCState(GrpcCallWrapper):
     cdef bint metadata_sent
     cdef bint status_sent
     cdef grpc_status_code status_code
+    cdef object py_status_code
     cdef str status_details
     cdef tuple trailing_metadata
     cdef object compression_algorithm
@@ -60,6 +61,13 @@ cdef class _MessageReceiver:
     cdef object _agen
 
 
+cdef class _MethodResolver:
+    cdef list _generic_handlers
+    cdef dict _registered_method_handlers
+
+    cpdef resolve_handler(self, _HandlerCallDetails handler_call_details)
+
+
 cdef enum AioServerStatus:
     AIO_SERVER_STATUS_UNKNOWN
     AIO_SERVER_STATUS_READY
@@ -71,13 +79,13 @@ cdef enum AioServerStatus:
 cdef class _ConcurrentRpcLimiter:
     cdef int _maximum_concurrent_rpcs
     cdef int _active_rpcs
-    cdef object _active_rpcs_condition # asyncio.Condition
-    cdef object _loop  # asyncio.EventLoop
+    cdef bint limiter_concurrency_exceeded
 
 
 cdef class AioServer:
     cdef Server _server
     cdef list _generic_handlers
+    cdef dict _registered_method_handlers  # Dict[str, grpc.RpcMethodHandler]
     cdef AioServerStatus _status
     cdef object _loop  # asyncio.EventLoop
     cdef object _serving_task  # asyncio.Task

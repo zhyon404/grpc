@@ -19,17 +19,15 @@
 #ifndef GRPC_GRPC_H
 #define GRPC_GRPC_H
 
-#include <grpc/support/port_platform.h>
-
-#include <stddef.h>
-
 #include <grpc/byte_buffer.h>
-#include <grpc/impl/codegen/connectivity_state.h>
-#include <grpc/impl/codegen/grpc_types.h>
-#include <grpc/impl/codegen/propagation_bits.h>
+#include <grpc/impl/connectivity_state.h>  // IWYU pragma: export
+#include <grpc/impl/grpc_types.h>          // IWYU pragma: export
+#include <grpc/impl/propagation_bits.h>
 #include <grpc/slice.h>
 #include <grpc/status.h>
+#include <grpc/support/port_platform.h>
 #include <grpc/support/time.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,16 +45,6 @@ GRPCAPI void grpc_metadata_array_destroy(grpc_metadata_array* array);
 
 GRPCAPI void grpc_call_details_init(grpc_call_details* details);
 GRPCAPI void grpc_call_details_destroy(grpc_call_details* details);
-
-/** Registers a plugin to be initialized and destroyed with the library.
-
-    The \a init and \a destroy functions will be invoked as part of
-    \a grpc_init() and \a grpc_shutdown(), respectively.
-    Note that these functions can be invoked an arbitrary number of times
-    (and hence so will \a init and \a destroy).
-    It is safe to pass NULL to either argument. Plugins are destroyed in
-    the reverse order they were initialized. */
-GRPCAPI void grpc_register_plugin(void (*init)(void), void (*destroy)(void));
 
 /** Initialize the grpc library.
 
@@ -187,12 +175,6 @@ GRPCAPI int grpc_completion_queue_thread_local_cache_flush(
 GRPCAPI grpc_connectivity_state grpc_channel_check_connectivity_state(
     grpc_channel* channel, int try_to_connect);
 
-/** Number of active "external connectivity state watchers" attached to a
- * channel.
- * Useful for testing. **/
-GRPCAPI int grpc_channel_num_external_connectivity_watchers(
-    grpc_channel* channel);
-
 /** Watch for a change in connectivity state.
     Once the channel connectivity state is different from last_observed_state,
     tag will be enqueued on cq with success=1.
@@ -269,6 +251,13 @@ GRPCAPI grpc_call_error grpc_call_start_batch(grpc_call* call,
     functionality. Instead, use grpc_auth_context. */
 GRPCAPI char* grpc_call_get_peer(grpc_call* call);
 
+/** Returns a newly allocated string containing the local address of the
+    connection that this call is using.
+    Currently only guaranteed to be populated for server calls; client calls
+    may return "unknown".
+    The returned string should be disposed of with gpr_free(). */
+GRPCAPI char* grpc_call_get_local_address(grpc_call* call);
+
 struct census_context;
 
 /** Set census context for a call; Must be called before first call to
@@ -338,6 +327,9 @@ GRPCAPI grpc_channel* grpc_lame_client_channel_create(
 /** Close and destroy a grpc channel */
 GRPCAPI void grpc_channel_destroy(grpc_channel* channel);
 
+/** Returns a vtable for storing grpc_channel_args in a channel arg. */
+GRPCAPI const grpc_arg_pointer_vtable* grpc_channel_args_arg_vtable(void);
+
 /** Error handling for grpc_call
    Most grpc_call functions return a grpc_error. If the error is not GRPC_OK
    then the operation failed due to some unsatisfied precondition.
@@ -377,6 +369,13 @@ GRPCAPI void grpc_call_ref(grpc_call* call);
 /** Unref a call.
     THREAD SAFETY: grpc_call_unref is thread-compatible */
 GRPCAPI void grpc_call_unref(grpc_call* call);
+
+typedef struct grpc_call_credentials grpc_call_credentials;
+
+/** Sets a credentials to a call. Can only be called on the client side before
+   grpc_call_start_batch. */
+GRPCAPI grpc_call_error grpc_call_set_credentials(grpc_call* call,
+                                                  grpc_call_credentials* creds);
 
 /** Request notification of a new call.
     Once a call is received, a notification tagged with \a tag_new is added to
@@ -457,18 +456,17 @@ typedef struct {
 
 typedef struct grpc_server_config_fetcher grpc_server_config_fetcher;
 
+/** EXPERIMENTAL.  Channel arg vtable for server config fetcher. */
+GRPCAPI const grpc_arg_pointer_vtable* grpc_server_config_fetcher_arg_vtable(
+    void);
+
 /** EXPERIMENTAL.  Creates an xDS config fetcher. */
 GRPCAPI grpc_server_config_fetcher* grpc_server_config_fetcher_xds_create(
     grpc_server_xds_status_notifier notifier, const grpc_channel_args* args);
 
-/** EXPERIMENTAL.  Destroys a config fetcher. */
-GRPCAPI void grpc_server_config_fetcher_destroy(
+/** EXPERIMENTAL.  Unrefs a config fetcher. */
+GRPCAPI void grpc_server_config_fetcher_unref(
     grpc_server_config_fetcher* config_fetcher);
-
-/** EXPERIMENTAL.  Sets the server's config fetcher.  Takes ownership.
-    Must be called before adding ports */
-GRPCAPI void grpc_server_set_config_fetcher(
-    grpc_server* server, grpc_server_config_fetcher* config_fetcher);
 
 /** Add a HTTP2 over an encrypted link over tcp listener.
    Returns bound port number on success, 0 on failure.
@@ -540,9 +538,13 @@ GRPCAPI void grpc_resource_quota_resize(grpc_resource_quota* resource_quota,
 GRPCAPI void grpc_resource_quota_set_max_threads(
     grpc_resource_quota* resource_quota, int new_max_threads);
 
+/** Update the size of the maximum number of streams allowed */
+GRPCAPI void grpc_resource_quota_set_max_outstanding_streams(
+    grpc_resource_quota* resource_quota, int new_max_outstanding_streams);
+
 /** EXPERIMENTAL.  Dumps xDS configs as a serialized ClientConfig proto.
     The full name of the proto is envoy.service.status.v3.ClientConfig. */
-GRPCAPI grpc_slice grpc_dump_xds_configs();
+GRPCAPI grpc_slice grpc_dump_xds_configs(void);
 
 /** Fetch a vtable for a grpc_channel_arg that points to a grpc_resource_quota
  */

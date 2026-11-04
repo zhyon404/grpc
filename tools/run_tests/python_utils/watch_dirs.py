@@ -16,14 +16,12 @@
 import os
 import time
 
-from six import string_types
 
-
-class DirWatcher(object):
+class DirWatcher:
     """Helper to watch a (set) of directories for modifications."""
 
     def __init__(self, paths):
-        if isinstance(paths, string_types):
+        if isinstance(paths, str):
             paths = [paths]
         self._done = False
         self.paths = list(paths)
@@ -40,7 +38,7 @@ class DirWatcher(object):
                 continue
             for root, _, files in os.walk(path):
                 for f in files:
-                    if f and f[0] == '.':
+                    if f and f[0] == ".":
                         continue
                     try:
                         st = os.stat(os.path.join(root, f))
@@ -51,8 +49,9 @@ class DirWatcher(object):
                     if most_recent_change is None:
                         most_recent_change = st.st_mtime
                     else:
-                        most_recent_change = max(most_recent_change,
-                                                 st.st_mtime)
+                        most_recent_change = max(
+                            most_recent_change, st.st_mtime
+                        )
         return most_recent_change
 
     def most_recent_change(self):

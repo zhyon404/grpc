@@ -16,11 +16,12 @@
 
 #include "test/cpp/end2end/rls_server.h"
 
-#include <gmock/gmock.h>
+#include <grpc/lookup/v1/rls.grpc.pb.h>
+#include <grpc/lookup/v1/rls.pb.h>
 
-#include "src/proto/grpc/lookup/v1/rls.grpc.pb.h"
-#include "src/proto/grpc/lookup/v1/rls.pb.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/test_config.h"
+#include "gmock/gmock.h"
+#include "absl/log/log.h"
 
 using ::grpc::lookup::v1::RouteLookupRequest;
 using ::grpc::lookup::v1::RouteLookupResponse;
@@ -31,8 +32,7 @@ namespace testing {
 ::grpc::Status RlsServiceImpl::RouteLookup(grpc::ServerContext* context,
                                            const RouteLookupRequest* request,
                                            RouteLookupResponse* response) {
-  gpr_log(GPR_INFO, "RLS: Received request: %s",
-          request->DebugString().c_str());
+  LOG(INFO) << "RLS: Received request: " << request->DebugString();
   if (context_proc_ != nullptr) {
     context_proc_(context);
   }
@@ -41,10 +41,10 @@ namespace testing {
   // See if we have a configured response for this request.
   ResponseData res;
   {
-    grpc::internal::MutexLock lock(&mu_);
+    grpc::internal::MutexLock lock(mu_);
     auto it = responses_.find(*request);
     if (it == responses_.end()) {
-      gpr_log(GPR_INFO, "RLS: no matching request, returning INTERNAL");
+      LOG(INFO) << "RLS: no matching request, returning INTERNAL";
       unmatched_requests_.push_back(*request);
       return Status(StatusCode::INTERNAL, "no response entry");
     }
@@ -57,25 +57,25 @@ namespace testing {
   }
   IncreaseResponseCount();
   *response = res.response;
-  gpr_log(GPR_INFO, "RLS: returning configured response: %s",
-          response->DebugString().c_str());
+  LOG(INFO) << "RLS: returning configured response: "
+            << response->DebugString();
   return Status::OK;
 }
 
 void RlsServiceImpl::SetResponse(RouteLookupRequest request,
                                  RouteLookupResponse response,
                                  grpc_core::Duration response_delay) {
-  grpc::internal::MutexLock lock(&mu_);
+  grpc::internal::MutexLock lock(mu_);
   responses_[std::move(request)] = {std::move(response), response_delay};
 }
 
 void RlsServiceImpl::RemoveResponse(const RouteLookupRequest& request) {
-  grpc::internal::MutexLock lock(&mu_);
+  grpc::internal::MutexLock lock(mu_);
   responses_.erase(request);
 }
 
 std::vector<RouteLookupRequest> RlsServiceImpl::GetUnmatchedRequests() {
-  grpc::internal::MutexLock lock(&mu_);
+  grpc::internal::MutexLock lock(mu_);
   return std::move(unmatched_requests_);
 }
 

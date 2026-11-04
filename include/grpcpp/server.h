@@ -1,45 +1,44 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #ifndef GRPCPP_SERVER_H
 #define GRPCPP_SERVER_H
 
-#include <grpc/impl/codegen/port_platform.h>
-
-#include <list>
-#include <memory>
-#include <vector>
-
 #include <grpc/compression.h>
+#include <grpc/event_engine/memory_allocator.h>
 #include <grpc/support/atm.h>
+#include <grpc/support/port_platform.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/completion_queue.h>
 #include <grpcpp/health_check_service_interface.h>
 #include <grpcpp/impl/call.h>
-#include <grpcpp/impl/codegen/client_interceptor.h>
-#include <grpcpp/impl/codegen/completion_queue.h>
-#include <grpcpp/impl/codegen/grpc_library.h>
-#include <grpcpp/impl/codegen/server_interface.h>
+#include <grpcpp/impl/grpc_library.h>
 #include <grpcpp/impl/rpc_service_method.h>
 #include <grpcpp/security/server_credentials.h>
+#include <grpcpp/server_interface.h>
 #include <grpcpp/support/channel_arguments.h>
+#include <grpcpp/support/client_interceptor.h>
 #include <grpcpp/support/config.h>
 #include <grpcpp/support/status.h>
+
+#include <list>
+#include <memory>
+#include <vector>
 
 struct grpc_server;
 
@@ -56,7 +55,7 @@ class ExternalConnectionAcceptorImpl;
 ///
 /// Use a \a grpc::ServerBuilder to create, configure, and start
 /// \a Server instances.
-class Server : public ServerInterface, private GrpcLibraryCodegen {
+class Server : public ServerInterface, private internal::GrpcLibrary {
  public:
   ~Server() ABSL_LOCKS_EXCLUDED(mu_) override;
 
@@ -179,12 +178,12 @@ class Server : public ServerInterface, private GrpcLibraryCodegen {
          int min_pollers, int max_pollers, int sync_cq_timeout_msec,
          std::vector<std::shared_ptr<internal::ExternalConnectionAcceptorImpl>>
              acceptors,
-         grpc_server_config_fetcher* server_config_fetcher = nullptr,
          grpc_resource_quota* server_rq = nullptr,
          std::vector<
              std::unique_ptr<experimental::ServerInterceptorFactoryInterface>>
              interceptor_creators = std::vector<std::unique_ptr<
-                 experimental::ServerInterceptorFactoryInterface>>());
+                 experimental::ServerInterceptorFactoryInterface>>(),
+         experimental::ServerMetricRecorder* server_metric_recorder = nullptr);
 
   /// Start the server.
   ///
@@ -196,7 +195,6 @@ class Server : public ServerInterface, private GrpcLibraryCodegen {
 
   grpc_server* server() override { return server_; }
 
- protected:
   /// NOTE: This method is not part of the public API for this class.
   void set_health_check_service(
       std::unique_ptr<HealthCheckServiceInterface> service) {
@@ -209,6 +207,8 @@ class Server : public ServerInterface, private GrpcLibraryCodegen {
   bool health_check_service_disabled() const {
     return health_check_service_disabled_;
   }
+
+  grpc_event_engine::experimental::MemoryAllocator* memory_allocator() override;
 
  private:
   std::vector<std::unique_ptr<experimental::ServerInterceptorFactoryInterface>>*
@@ -247,14 +247,19 @@ class Server : public ServerInterface, private GrpcLibraryCodegen {
     context_allocator_ = std::move(context_allocator);
   }
 
-  void PerformOpsOnCall(internal::CallOpSetInterface* ops,
-                        internal::Call* call) override;
-
   void ShutdownInternal(gpr_timespec deadline)
       ABSL_LOCKS_EXCLUDED(mu_) override;
 
   int max_receive_message_size() const override {
     return max_receive_message_size_;
+  }
+
+  bool call_metric_recording_enabled() const override {
+    return call_metric_recording_enabled_;
+  }
+
+  experimental::ServerMetricRecorder* server_metric_recorder() const override {
+    return server_metric_recorder_;
   }
 
   CompletionQueue* CallbackCQ() ABSL_LOCKS_EXCLUDED(mu_) override;
@@ -291,8 +296,11 @@ class Server : public ServerInterface, private GrpcLibraryCodegen {
   /// the \a sync_server_cqs)
   std::vector<std::unique_ptr<SyncRequestThreadManager>> sync_req_mgrs_;
 
+  // Memory allocator for the server.
+  grpc_event_engine::experimental::MemoryAllocator memory_allocator_;
+
   // Server status
-  internal::Mutex mu_;
+  mutable internal::Mutex mu_;
   bool started_;
   bool shutdown_ ABSL_GUARDED_BY(mu_);
   bool shutdown_notified_
@@ -340,6 +348,12 @@ class Server : public ServerInterface, private GrpcLibraryCodegen {
   // Shutdown.  Even though this is only used with NDEBUG, instantiate it in all
   // cases since otherwise the size will be inconsistent.
   std::vector<CompletionQueue*> cq_list_;
+
+  // Whetner per-call load reporting is enabled.
+  bool call_metric_recording_enabled_ = false;
+
+  // Interface to read or update server-wide metrics. Optional.
+  experimental::ServerMetricRecorder* server_metric_recorder_ = nullptr;
 };
 
 }  // namespace grpc

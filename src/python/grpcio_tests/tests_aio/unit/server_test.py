@@ -24,85 +24,92 @@ from tests.unit import resources
 from tests.unit.framework.common import test_constants
 from tests_aio.unit._test_base import AioTestBase
 
-_SIMPLE_UNARY_UNARY = '/test/SimpleUnaryUnary'
-_BLOCK_FOREVER = '/test/BlockForever'
-_BLOCK_BRIEFLY = '/test/BlockBriefly'
-_UNARY_STREAM_ASYNC_GEN = '/test/UnaryStreamAsyncGen'
-_UNARY_STREAM_READER_WRITER = '/test/UnaryStreamReaderWriter'
-_UNARY_STREAM_EVILLY_MIXED = '/test/UnaryStreamEvillyMixed'
-_STREAM_UNARY_ASYNC_GEN = '/test/StreamUnaryAsyncGen'
-_STREAM_UNARY_READER_WRITER = '/test/StreamUnaryReaderWriter'
-_STREAM_UNARY_EVILLY_MIXED = '/test/StreamUnaryEvillyMixed'
-_STREAM_STREAM_ASYNC_GEN = '/test/StreamStreamAsyncGen'
-_STREAM_STREAM_READER_WRITER = '/test/StreamStreamReaderWriter'
-_STREAM_STREAM_EVILLY_MIXED = '/test/StreamStreamEvillyMixed'
-_UNIMPLEMENTED_METHOD = '/test/UnimplementedMethod'
-_ERROR_IN_STREAM_STREAM = '/test/ErrorInStreamStream'
-_ERROR_IN_STREAM_UNARY = '/test/ErrorInStreamUnary'
-_ERROR_WITHOUT_RAISE_IN_UNARY_UNARY = '/test/ErrorWithoutRaiseInUnaryUnary'
-_ERROR_WITHOUT_RAISE_IN_STREAM_STREAM = '/test/ErrorWithoutRaiseInStreamStream'
-_INVALID_TRAILING_METADATA = '/test/InvalidTrailingMetadata'
+_SIMPLE_UNARY_UNARY = "/test/SimpleUnaryUnary"
+_SIMPLE_UNARY_UNARY_REGISTERED = "/test/SimpleUnaryUnaryRegistered"
+_BLOCK_FOREVER = "/test/BlockForever"
+_BLOCK_BRIEFLY = "/test/BlockBriefly"
+_UNARY_STREAM_ASYNC_GEN = "/test/UnaryStreamAsyncGen"
+_UNARY_STREAM_READER_WRITER = "/test/UnaryStreamReaderWriter"
+_UNARY_STREAM_EVILLY_MIXED = "/test/UnaryStreamEvillyMixed"
+_STREAM_UNARY_ASYNC_GEN = "/test/StreamUnaryAsyncGen"
+_STREAM_UNARY_READER_WRITER = "/test/StreamUnaryReaderWriter"
+_STREAM_UNARY_EVILLY_MIXED = "/test/StreamUnaryEvillyMixed"
+_STREAM_STREAM_ASYNC_GEN = "/test/StreamStreamAsyncGen"
+_STREAM_STREAM_READER_WRITER = "/test/StreamStreamReaderWriter"
+_STREAM_STREAM_EVILLY_MIXED = "/test/StreamStreamEvillyMixed"
+_UNIMPLEMENTED_METHOD = "/test/UnimplementedMethod"
+_ERROR_IN_STREAM_STREAM = "/test/ErrorInStreamStream"
+_ERROR_IN_STREAM_UNARY = "/test/ErrorInStreamUnary"
+_ERROR_WITHOUT_RAISE_IN_UNARY_UNARY = "/test/ErrorWithoutRaiseInUnaryUnary"
+_ERROR_WITHOUT_RAISE_IN_STREAM_STREAM = "/test/ErrorWithoutRaiseInStreamStream"
+_INVALID_TRAILING_METADATA = "/test/InvalidTrailingMetadata"
 
-_REQUEST = b'\x00\x00\x00'
-_RESPONSE = b'\x01\x01\x01'
+_REQUEST = b"\x00\x00\x00"
+_RESPONSE = b"\x01\x01\x01"
+_REGISTERED_RESPONSE = b"\x02\x02\x02"
 _NUM_STREAM_REQUESTS = 3
 _NUM_STREAM_RESPONSES = 5
 _MAXIMUM_CONCURRENT_RPCS = 5
 
 
 class _GenericHandler(grpc.GenericRpcHandler):
-
     def __init__(self):
         self._called = asyncio.get_event_loop().create_future()
         self._routing_table = {
-            _SIMPLE_UNARY_UNARY:
-                grpc.unary_unary_rpc_method_handler(self._unary_unary),
-            _BLOCK_FOREVER:
-                grpc.unary_unary_rpc_method_handler(self._block_forever),
-            _BLOCK_BRIEFLY:
-                grpc.unary_unary_rpc_method_handler(self._block_briefly),
-            _UNARY_STREAM_ASYNC_GEN:
-                grpc.unary_stream_rpc_method_handler(
-                    self._unary_stream_async_gen),
-            _UNARY_STREAM_READER_WRITER:
-                grpc.unary_stream_rpc_method_handler(
-                    self._unary_stream_reader_writer),
-            _UNARY_STREAM_EVILLY_MIXED:
-                grpc.unary_stream_rpc_method_handler(
-                    self._unary_stream_evilly_mixed),
-            _STREAM_UNARY_ASYNC_GEN:
-                grpc.stream_unary_rpc_method_handler(
-                    self._stream_unary_async_gen),
-            _STREAM_UNARY_READER_WRITER:
-                grpc.stream_unary_rpc_method_handler(
-                    self._stream_unary_reader_writer),
-            _STREAM_UNARY_EVILLY_MIXED:
-                grpc.stream_unary_rpc_method_handler(
-                    self._stream_unary_evilly_mixed),
-            _STREAM_STREAM_ASYNC_GEN:
-                grpc.stream_stream_rpc_method_handler(
-                    self._stream_stream_async_gen),
-            _STREAM_STREAM_READER_WRITER:
-                grpc.stream_stream_rpc_method_handler(
-                    self._stream_stream_reader_writer),
-            _STREAM_STREAM_EVILLY_MIXED:
-                grpc.stream_stream_rpc_method_handler(
-                    self._stream_stream_evilly_mixed),
-            _ERROR_IN_STREAM_STREAM:
-                grpc.stream_stream_rpc_method_handler(
-                    self._error_in_stream_stream),
-            _ERROR_IN_STREAM_UNARY:
-                grpc.stream_unary_rpc_method_handler(
-                    self._value_error_in_stream_unary),
-            _ERROR_WITHOUT_RAISE_IN_UNARY_UNARY:
-                grpc.unary_unary_rpc_method_handler(
-                    self._error_without_raise_in_unary_unary),
-            _ERROR_WITHOUT_RAISE_IN_STREAM_STREAM:
-                grpc.stream_stream_rpc_method_handler(
-                    self._error_without_raise_in_stream_stream),
-            _INVALID_TRAILING_METADATA:
-                grpc.unary_unary_rpc_method_handler(
-                    self._invalid_trailing_metadata),
+            _SIMPLE_UNARY_UNARY: grpc.unary_unary_rpc_method_handler(
+                self._unary_unary
+            ),
+            _SIMPLE_UNARY_UNARY_REGISTERED: grpc.unary_unary_rpc_method_handler(
+                self._unary_unary
+            ),
+            _BLOCK_FOREVER: grpc.unary_unary_rpc_method_handler(
+                self._block_forever
+            ),
+            _BLOCK_BRIEFLY: grpc.unary_unary_rpc_method_handler(
+                self._block_briefly
+            ),
+            _UNARY_STREAM_ASYNC_GEN: grpc.unary_stream_rpc_method_handler(
+                self._unary_stream_async_gen
+            ),
+            _UNARY_STREAM_READER_WRITER: grpc.unary_stream_rpc_method_handler(
+                self._unary_stream_reader_writer
+            ),
+            _UNARY_STREAM_EVILLY_MIXED: grpc.unary_stream_rpc_method_handler(
+                self._unary_stream_evilly_mixed
+            ),
+            _STREAM_UNARY_ASYNC_GEN: grpc.stream_unary_rpc_method_handler(
+                self._stream_unary_async_gen
+            ),
+            _STREAM_UNARY_READER_WRITER: grpc.stream_unary_rpc_method_handler(
+                self._stream_unary_reader_writer
+            ),
+            _STREAM_UNARY_EVILLY_MIXED: grpc.stream_unary_rpc_method_handler(
+                self._stream_unary_evilly_mixed
+            ),
+            _STREAM_STREAM_ASYNC_GEN: grpc.stream_stream_rpc_method_handler(
+                self._stream_stream_async_gen
+            ),
+            _STREAM_STREAM_READER_WRITER: grpc.stream_stream_rpc_method_handler(
+                self._stream_stream_reader_writer
+            ),
+            _STREAM_STREAM_EVILLY_MIXED: grpc.stream_stream_rpc_method_handler(
+                self._stream_stream_evilly_mixed
+            ),
+            _ERROR_IN_STREAM_STREAM: grpc.stream_stream_rpc_method_handler(
+                self._error_in_stream_stream
+            ),
+            _ERROR_IN_STREAM_UNARY: grpc.stream_unary_rpc_method_handler(
+                self._value_error_in_stream_unary
+            ),
+            _ERROR_WITHOUT_RAISE_IN_UNARY_UNARY: grpc.unary_unary_rpc_method_handler(
+                self._error_without_raise_in_unary_unary
+            ),
+            _ERROR_WITHOUT_RAISE_IN_STREAM_STREAM: grpc.stream_stream_rpc_method_handler(
+                self._error_without_raise_in_stream_stream
+            ),
+            _INVALID_TRAILING_METADATA: grpc.unary_unary_rpc_method_handler(
+                self._invalid_trailing_metadata
+            ),
         }
 
     @staticmethod
@@ -182,7 +189,7 @@ class _GenericHandler(grpc.GenericRpcHandler):
     async def _error_in_stream_stream(self, request_iterator, unused_context):
         async for request in request_iterator:
             assert _REQUEST == request
-            raise RuntimeError('A testing RuntimeError!')
+            raise RuntimeError("A testing RuntimeError!")
         yield _RESPONSE
 
     async def _value_error_in_stream_unary(self, request_iterator, context):
@@ -191,14 +198,15 @@ class _GenericHandler(grpc.GenericRpcHandler):
             assert _REQUEST == request
             request_count += 1
             if request_count >= 1:
-                raise ValueError('A testing RuntimeError!')
+                raise ValueError("A testing RuntimeError!")
 
     async def _error_without_raise_in_unary_unary(self, request, context):
         assert _REQUEST == request
         context.set_code(grpc.StatusCode.INTERNAL)
 
-    async def _error_without_raise_in_stream_stream(self, request_iterator,
-                                                    context):
+    async def _error_without_raise_in_stream_stream(
+        self, request_iterator, context
+    ):
         async for request in request_iterator:
             assert _REQUEST == request
         context.set_code(grpc.StatusCode.INTERNAL)
@@ -206,11 +214,10 @@ class _GenericHandler(grpc.GenericRpcHandler):
     async def _invalid_trailing_metadata(self, request, context):
         assert _REQUEST == request
         for invalid_metadata in [
-                42, {}, {
-                    'error': 'error'
-                }, [{
-                    'error': "error"
-                }]
+            42,
+            {},
+            {"error": "error"},
+            [{"error": "error"}],
         ]:
             try:
                 context.set_trailing_metadata(invalid_metadata)
@@ -218,14 +225,15 @@ class _GenericHandler(grpc.GenericRpcHandler):
                 pass
             else:
                 raise ValueError(
-                    f'No TypeError raised for invalid metadata: {invalid_metadata}'
+                    "No TypeError raised for invalid metadata:"
+                    f" {invalid_metadata}"
                 )
 
-        await context.abort(grpc.StatusCode.DATA_LOSS,
-                            details="invalid abort",
-                            trailing_metadata=({
-                                'error': ('error1', 'error2')
-                            }))
+        await context.abort(
+            grpc.StatusCode.DATA_LOSS,
+            details="invalid abort",
+            trailing_metadata=({"error": ("error1", "error2")}),
+        )
 
     def service(self, handler_details):
         if not self._called.done():
@@ -238,15 +246,27 @@ class _GenericHandler(grpc.GenericRpcHandler):
 
 async def _start_test_server():
     server = aio.server()
-    port = server.add_insecure_port('[::]:0')
+    port = server.add_insecure_port("[::]:0")
     generic_handler = _GenericHandler()
     server.add_generic_rpc_handlers((generic_handler,))
+
+    async def registered_unary_unary_handler(
+        unused_request_iter, unused_context
+    ):
+        return _REGISTERED_RESPONSE
+
+    registered_handlers = {
+        "SimpleUnaryUnaryRegistered": grpc.unary_unary_rpc_method_handler(
+            registered_unary_unary_handler
+        ),
+    }
+    server.add_registered_method_handlers("test", registered_handlers)
+
     await server.start()
-    return 'localhost:%d' % port, server, generic_handler
+    return "localhost:%d" % port, server, generic_handler
 
 
 class TestServer(AioTestBase):
-
     async def setUp(self):
         addr, self._server, self._generic_handler = await _start_test_server()
         self._channel = aio.insecure_channel(addr)
@@ -274,7 +294,8 @@ class TestServer(AioTestBase):
 
     async def test_unary_stream_reader_writer(self):
         unary_stream_call = self._channel.unary_stream(
-            _UNARY_STREAM_READER_WRITER)
+            _UNARY_STREAM_READER_WRITER
+        )
         call = unary_stream_call(_REQUEST)
 
         for _ in range(_NUM_STREAM_RESPONSES):
@@ -285,7 +306,8 @@ class TestServer(AioTestBase):
 
     async def test_unary_stream_evilly_mixed(self):
         unary_stream_call = self._channel.unary_stream(
-            _UNARY_STREAM_EVILLY_MIXED)
+            _UNARY_STREAM_EVILLY_MIXED
+        )
         call = unary_stream_call(_REQUEST)
 
         # Uses reader API
@@ -328,7 +350,8 @@ class TestServer(AioTestBase):
 
     async def test_stream_unary_reader_writer(self):
         stream_unary_call = self._channel.stream_unary(
-            _STREAM_UNARY_READER_WRITER)
+            _STREAM_UNARY_READER_WRITER
+        )
         call = stream_unary_call()
 
         for _ in range(_NUM_STREAM_REQUESTS):
@@ -341,7 +364,8 @@ class TestServer(AioTestBase):
 
     async def test_stream_unary_evilly_mixed(self):
         stream_unary_call = self._channel.stream_unary(
-            _STREAM_UNARY_EVILLY_MIXED)
+            _STREAM_UNARY_EVILLY_MIXED
+        )
         call = stream_unary_call()
 
         for _ in range(_NUM_STREAM_REQUESTS):
@@ -354,7 +378,8 @@ class TestServer(AioTestBase):
 
     async def test_stream_stream_async_generator(self):
         stream_stream_call = self._channel.stream_stream(
-            _STREAM_STREAM_ASYNC_GEN)
+            _STREAM_STREAM_ASYNC_GEN
+        )
         call = stream_stream_call()
 
         for _ in range(_NUM_STREAM_REQUESTS):
@@ -369,7 +394,8 @@ class TestServer(AioTestBase):
 
     async def test_stream_stream_reader_writer(self):
         stream_stream_call = self._channel.stream_stream(
-            _STREAM_STREAM_READER_WRITER)
+            _STREAM_STREAM_READER_WRITER
+        )
         call = stream_stream_call()
 
         for _ in range(_NUM_STREAM_REQUESTS):
@@ -384,7 +410,8 @@ class TestServer(AioTestBase):
 
     async def test_stream_stream_evilly_mixed(self):
         stream_stream_call = self._channel.stream_stream(
-            _STREAM_STREAM_EVILLY_MIXED)
+            _STREAM_STREAM_EVILLY_MIXED
+        )
         call = stream_stream_call()
 
         for _ in range(_NUM_STREAM_REQUESTS):
@@ -413,8 +440,9 @@ class TestServer(AioTestBase):
         shutdown_start_time = time.time()
         await self._server.stop(test_constants.SHORT_TIMEOUT)
         grace_period_length = time.time() - shutdown_start_time
-        self.assertGreater(grace_period_length,
-                           test_constants.SHORT_TIMEOUT / 3)
+        self.assertGreater(
+            grace_period_length, test_constants.SHORT_TIMEOUT / 3
+        )
 
         # Validates the states.
         self.assertEqual(_RESPONSE, await call)
@@ -428,8 +456,9 @@ class TestServer(AioTestBase):
 
         with self.assertRaises(aio.AioRpcError) as exception_context:
             await call
-        self.assertEqual(grpc.StatusCode.UNAVAILABLE,
-                         exception_context.exception.code())
+        self.assertEqual(
+            grpc.StatusCode.UNAVAILABLE, exception_context.exception.code()
+        )
 
     async def test_concurrent_graceful_shutdown(self):
         call = self._channel.unary_unary(_BLOCK_BRIEFLY)(_REQUEST)
@@ -443,8 +472,9 @@ class TestServer(AioTestBase):
             self._server.stop(test_constants.LONG_TIMEOUT),
         )
         grace_period_length = time.time() - shutdown_start_time
-        self.assertGreater(grace_period_length,
-                           test_constants.SHORT_TIMEOUT / 3)
+        self.assertGreater(
+            grace_period_length, test_constants.SHORT_TIMEOUT / 3
+        )
 
         self.assertEqual(_RESPONSE, await call)
         self.assertTrue(call.done())
@@ -463,8 +493,9 @@ class TestServer(AioTestBase):
 
         with self.assertRaises(aio.AioRpcError) as exception_context:
             await call
-        self.assertEqual(grpc.StatusCode.UNAVAILABLE,
-                         exception_context.exception.code())
+        self.assertEqual(
+            grpc.StatusCode.UNAVAILABLE, exception_context.exception.code()
+        )
 
     async def test_shutdown_before_call(self):
         await self._server.stop(None)
@@ -483,11 +514,16 @@ class TestServer(AioTestBase):
 
     async def test_shutdown_during_stream_stream(self):
         stream_stream_call = self._channel.stream_stream(
-            _STREAM_STREAM_ASYNC_GEN)
+            _STREAM_STREAM_ASYNC_GEN
+        )
         call = stream_stream_call()
 
         # Don't half close the RPC yet, keep it alive.
         await call.write(_REQUEST)
+        # wait until the RPC has slot assigned on a server side; else test is
+        # not deterministic (e.g. server shutdown might happen before RPC
+        # is established)
+        await self._generic_handler.wait_for_call()
         await self._server.stop(None)
 
         self.assertEqual(grpc.StatusCode.UNAVAILABLE, await call.code())
@@ -495,7 +531,8 @@ class TestServer(AioTestBase):
 
     async def test_error_in_stream_stream(self):
         stream_stream_call = self._channel.stream_stream(
-            _ERROR_IN_STREAM_STREAM)
+            _ERROR_IN_STREAM_STREAM
+        )
         call = stream_stream_call()
 
         # Don't half close the RPC yet, keep it alive.
@@ -506,7 +543,8 @@ class TestServer(AioTestBase):
 
     async def test_error_without_raise_in_unary_unary(self):
         call = self._channel.unary_unary(_ERROR_WITHOUT_RAISE_IN_UNARY_UNARY)(
-            _REQUEST)
+            _REQUEST
+        )
 
         with self.assertRaises(aio.AioRpcError) as exception_context:
             await call
@@ -516,7 +554,8 @@ class TestServer(AioTestBase):
 
     async def test_error_without_raise_in_stream_stream(self):
         call = self._channel.stream_stream(
-            _ERROR_WITHOUT_RAISE_IN_STREAM_STREAM)()
+            _ERROR_WITHOUT_RAISE_IN_STREAM_STREAM
+        )()
 
         for _ in range(_NUM_STREAM_REQUESTS):
             await call.write(_REQUEST)
@@ -539,39 +578,129 @@ class TestServer(AioTestBase):
         self.assertEqual(grpc.StatusCode.UNKNOWN, rpc_error.code())
 
     async def test_port_binding_exception(self):
-        server = aio.server(options=(('grpc.so_reuseport', 0),))
-        port = server.add_insecure_port('localhost:0')
+        server = aio.server(options=(("grpc.so_reuseport", 0),))
+        port = server.add_insecure_port("localhost:0")
         bind_address = "localhost:%d" % port
 
         with self.assertRaises(RuntimeError):
             server.add_insecure_port(bind_address)
 
-        server_credentials = grpc.ssl_server_credentials([
-            (resources.private_key(), resources.certificate_chain())
-        ])
+        server_credentials = grpc.ssl_server_credentials(
+            [(resources.private_key(), resources.certificate_chain())]
+        )
         with self.assertRaises(RuntimeError):
             server.add_secure_port(bind_address, server_credentials)
 
     async def test_maximum_concurrent_rpcs(self):
+        async def coro_wrapper(awaitable):
+            return await awaitable
+
         # Build the server with concurrent rpc argument
         server = aio.server(maximum_concurrent_rpcs=_MAXIMUM_CONCURRENT_RPCS)
-        port = server.add_insecure_port('localhost:0')
+        port = server.add_insecure_port("localhost:0")
         bind_address = "localhost:%d" % port
         server.add_generic_rpc_handlers((_GenericHandler(),))
         await server.start()
         # Build the channel
         channel = aio.insecure_channel(bind_address)
         # Deplete the concurrent quota with 3 times of max RPCs
-        rpcs = []
+        rpc_tasks = []
         for _ in range(3 * _MAXIMUM_CONCURRENT_RPCS):
-            rpcs.append(channel.unary_unary(_BLOCK_BRIEFLY)(_REQUEST))
-        task = self.loop.create_task(
-            asyncio.wait(rpcs, return_when=asyncio.FIRST_EXCEPTION))
-        # Each batch took test_constants.SHORT_TIMEOUT /2
-        start_time = time.time()
-        await task
-        elapsed_time = time.time() - start_time
-        self.assertGreater(elapsed_time, test_constants.SHORT_TIMEOUT * 3 / 2)
+            task = asyncio.create_task(
+                coro_wrapper(channel.unary_unary(_BLOCK_BRIEFLY)(_REQUEST))
+            )
+            rpc_tasks.append(task)
+        await_tasks = asyncio.wait(rpc_tasks, return_when=asyncio.ALL_COMPLETED)
+
+        done, _ = await await_tasks
+        exceptions = []
+        for task in done:
+            exception = task.exception()
+            if exception:
+                exceptions.append(exception)
+
+        # Check whether the number of tasks raised RESOURCE_EXHAUSTED is roughly
+        # 2 * _MAXIMUM_CONCURRENT_RPCS.
+        self.assertAlmostEqual(
+            len(exceptions),
+            2 * _MAXIMUM_CONCURRENT_RPCS,
+            delta=_MAXIMUM_CONCURRENT_RPCS,
+        )
+        for exception in exceptions:
+            self.assertTrue(isinstance(exception, aio.AioRpcError))
+            self.assertEqual(
+                grpc.StatusCode.RESOURCE_EXHAUSTED, exception.code()
+            )
+            self.assertIn("Concurrent RPC limit exceeded", exception.details())
+
+        # Clean-up
+        await channel.close()
+        await server.stop(0)
+
+    async def test_maximum_concurrent_rpcs_not_underflow(self):
+        """Test that the concurrent RPC counter doesn't underflow.
+
+        This is a regression test for a bug where rejected requests would
+        still decrement the counter when they finished, causing the counter
+        to go negative and effectively disabling the limit for subsequent
+        requests.
+        """
+
+        async def coro_wrapper(awaitable):
+            return await awaitable
+
+        # Use a limit of 1 to make the test deterministic
+        max_concurrent = 1
+        server = aio.server(maximum_concurrent_rpcs=max_concurrent)
+        port = server.add_insecure_port("[::]:0")
+        bind_address = f"localhost:{port}"
+        server.add_generic_rpc_handlers((_GenericHandler(),))
+        await server.start()
+        channel = aio.insecure_channel(bind_address)
+
+        async def send_requests(num_requests):
+            """Send concurrent requests and return (successes, exhausted)."""
+            tasks = []
+            for _ in range(num_requests):
+                task = asyncio.create_task(
+                    coro_wrapper(channel.unary_unary(_BLOCK_BRIEFLY)(_REQUEST))
+                )
+                tasks.append(task)
+            await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
+
+            successes = 0
+            exhausted = 0
+            for task in tasks:
+                try:
+                    task.result()
+                    successes += 1
+                except aio.AioRpcError as e:
+                    if e.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
+                        exhausted += 1
+                    else:
+                        raise
+            return successes, exhausted
+
+        # Wave 1: Send 3 requests with limit=1
+        # Expected: 1 success, 2 RESOURCE_EXHAUSTED
+        wave1_success, wave1_exhausted = await send_requests(3)
+        self.assertEqual(wave1_success, max_concurrent)
+        self.assertEqual(wave1_exhausted, 2)
+
+        # Wait for all requests to fully complete
+        # Give other pending tasks chance to complete.
+        await asyncio.sleep(0)
+
+        # Wave 2: If the counter underflowed, more than 1 request would succeed
+        # Expected: 1 success, 2 RESOURCE_EXHAUSTED (same as wave 1)
+        wave2_success, wave2_exhausted = await send_requests(3)
+        self.assertEqual(
+            wave2_success,
+            max_concurrent,
+            "Counter underflow: wave 2 had more successes than the limit",
+        )
+        self.assertEqual(wave2_exhausted, 2)
+
         # Clean-up
         await channel.close()
         await server.stop(0)
@@ -584,9 +713,52 @@ class TestServer(AioTestBase):
 
         rpc_error = exception_context.exception
         self.assertEqual(grpc.StatusCode.UNKNOWN, rpc_error.code())
-        self.assertIn('trailing', rpc_error.details())
+        self.assertIn("trailing", rpc_error.details())
+
+    async def test_registered_handler_takes_precedence(self):
+        # Generic handler returns _RESPONSE for this method
+        # Registered handler return _REGISTERED_RESPONSE for this method
+        unary_unary_call = self._channel.unary_unary(
+            _SIMPLE_UNARY_UNARY_REGISTERED, _registered_method=True
+        )
+        response = await unary_unary_call(_REQUEST)
+        self.assertEqual(response, _REGISTERED_RESPONSE)
+
+    async def test_add_registered_handler_after_server_start(self):
+        async def registered_unary_unary_handler(
+            unused_request, unused_context
+        ):
+            return _RESPONSE
+
+        registered_handlers = {
+            "AddedAfterServerStart": grpc.unary_unary_rpc_method_handler(
+                registered_unary_unary_handler
+            ),
+        }
+        with self.assertLogs(level="WARNING") as cm:
+            self._server.add_registered_method_handlers(
+                "test", registered_handlers
+            )
+        self.assertTrue(
+            any(
+                "Cannot register method handlers" in output
+                for output in cm.output
+            )
+        )
+
+        call = self._channel.unary_unary(
+            "/test/AddedAfterServerStart",
+            _registered_method=True,
+        )(_REQUEST)
+        with self.assertRaises(grpc.RpcError) as exception_ctx:
+            await call
+
+        self.assertIn(
+            "Method not found",
+            str(exception_ctx.exception.details()),
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     unittest.main(verbosity=2)

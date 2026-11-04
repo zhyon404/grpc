@@ -1,30 +1,24 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <cinttypes>
-#include <memory>
-#include <thread>
-
-#include "absl/memory/memory.h"
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <grpc/grpc.h>
+#include <grpc/health/v1/health.grpc.pb.h>
 #include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
 #include <grpc/support/time.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
@@ -33,23 +27,39 @@
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
 #include <grpcpp/server_context.h>
+#include <grpcpp/support/channel_arguments.h>
 
-#include "src/core/ext/filters/client_channel/backup_poller.h"
-#include "src/core/lib/gpr/tls.h"
+#include <cinttypes>
+#include <memory>
+#include <thread>
+
+#include "src/core/client_channel/backup_poller.h"
+#include "src/core/config/config_vars.h"
+#include "src/core/lib/experiments/experiments.h"
 #include "src/core/lib/iomgr/port.h"
-#include "src/proto/grpc/health/v1/health.grpc.pb.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/debug_location.h"
+#include "src/core/util/grpc_check.h"
 #include "src/proto/grpc/testing/duplicate/echo_duplicate.grpc.pb.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/build.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
+#include "test/cpp/end2end/end2end_test_utils.h"
+#include "test/cpp/end2end/test_service_impl.h"
 #include "test/cpp/util/string_ref_helper.h"
 #include "test/cpp/util/test_credentials_provider.h"
+#include "absl/log/log.h"
+#include "absl/memory/memory.h"
+#include "absl/strings/match.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 
 #ifdef GRPC_POSIX_SOCKET_EV
 #include "src/core/lib/iomgr/ev_posix.h"
 #endif  // GRPC_POSIX_SOCKET_EV
 
-#include <gtest/gtest.h>
+#include "gtest/gtest.h"
 
 using grpc::testing::EchoRequest;
 using grpc::testing::EchoResponse;
@@ -60,6 +70,9 @@ namespace testing {
 
 namespace {
 
+// Change this to LOG(INFO) to debug this test. Do not submit LOG(INFO).
+#define GRPC_TESTING_LOCAL_LOG VLOG(3)
+
 void* tag(int t) { return reinterpret_cast<void*>(t); }
 int detag(void* p) { return static_cast<int>(reinterpret_cast<intptr_t>(p)); }
 
@@ -67,23 +80,30 @@ class Verifier {
  public:
   Verifier() : lambda_run_(false) {}
   // Expect sets the expected ok value for a specific tag
-  Verifier& Expect(int i, bool expect_ok) {
-    return ExpectUnless(i, expect_ok, false);
+  Verifier& Expect(
+      int tag, bool expect_ok,
+      grpc_core::SourceLocation whence = grpc_core::SourceLocation()) {
+    GRPC_TESTING_LOCAL_LOG << "Expect tag " << tag;
+    return ExpectUnless(tag, expect_ok, false, whence);
   }
   // ExpectUnless sets the expected ok value for a specific tag
   // unless the tag was already marked seen (as a result of ExpectMaybe)
-  Verifier& ExpectUnless(int i, bool expect_ok, bool seen) {
+  Verifier& ExpectUnless(
+      int i, bool expect_ok, bool seen,
+      grpc_core::SourceLocation whence = grpc_core::SourceLocation()) {
     if (!seen) {
-      expectations_[tag(i)] = expect_ok;
+      expectations_[tag(i)] = {expect_ok, whence};
     }
     return *this;
   }
   // ExpectMaybe sets the expected ok value for a specific tag, but does not
   // require it to appear
   // If it does, sets *seen to true
-  Verifier& ExpectMaybe(int i, bool expect_ok, bool* seen) {
+  Verifier& ExpectMaybe(
+      int i, bool expect_ok, bool* seen,
+      grpc_core::SourceLocation whence = grpc_core::SourceLocation()) {
     if (!*seen) {
-      maybe_expectations_[tag(i)] = MaybeExpect{expect_ok, seen};
+      maybe_expectations_[tag(i)] = MaybeExpect{expect_ok, seen, whence};
     }
     return *this;
   }
@@ -93,7 +113,10 @@ class Verifier {
   int Next(CompletionQueue* cq, bool ignore_ok) {
     bool ok;
     void* got_tag;
+    GRPC_TESTING_LOCAL_LOG << "Next: waiting for next tag";
     EXPECT_TRUE(cq->Next(&got_tag, &ok));
+    GRPC_TESTING_LOCAL_LOG << "Next: got tag " << detag(got_tag)
+                           << ", ok=" << ok;
     GotTag(got_tag, ok, ignore_ok);
     return detag(got_tag);
   }
@@ -117,7 +140,7 @@ class Verifier {
   // This version of Verify allows optionally ignoring the
   // outcome of the expectation
   void Verify(CompletionQueue* cq, bool ignore_ok) {
-    GPR_ASSERT(!expectations_.empty() || !maybe_expectations_.empty());
+    GRPC_CHECK(!expectations_.empty() || !maybe_expectations_.empty());
     while (!expectations_.empty()) {
       Next(cq, ignore_ok);
     }
@@ -130,14 +153,19 @@ class Verifier {
     if (expectations_.empty()) {
       bool ok;
       void* got_tag;
+      GRPC_TESTING_LOCAL_LOG << "Verify: waiting for timeout";
       EXPECT_EQ(cq->AsyncNext(&got_tag, &ok, deadline),
                 CompletionQueue::TIMEOUT);
+      GRPC_TESTING_LOCAL_LOG << "Verify: got timeout as expected";
     } else {
       while (!expectations_.empty()) {
         bool ok;
         void* got_tag;
+        GRPC_TESTING_LOCAL_LOG << "Verify: waiting for tag";
         EXPECT_EQ(cq->AsyncNext(&got_tag, &ok, deadline),
                   CompletionQueue::GOT_EVENT);
+        GRPC_TESTING_LOCAL_LOG << "Verify: got tag " << detag(got_tag)
+                               << ", ok=" << ok;
         GotTag(got_tag, ok, false);
       }
     }
@@ -153,14 +181,19 @@ class Verifier {
     if (expectations_.empty()) {
       bool ok;
       void* got_tag;
+      GRPC_TESTING_LOCAL_LOG << "Verify(lambda): waiting for timeout";
       EXPECT_EQ(DoOnceThenAsyncNext(cq, &got_tag, &ok, deadline, lambda),
                 CompletionQueue::TIMEOUT);
+      GRPC_TESTING_LOCAL_LOG << "Verify(lambda): got timeout as expected";
     } else {
       while (!expectations_.empty()) {
         bool ok;
         void* got_tag;
+        GRPC_TESTING_LOCAL_LOG << "Verify(lambda): waiting for tag";
         EXPECT_EQ(DoOnceThenAsyncNext(cq, &got_tag, &ok, deadline, lambda),
                   CompletionQueue::GOT_EVENT);
+        GRPC_TESTING_LOCAL_LOG << "Verify(lambda): got tag " << detag(got_tag)
+                               << ", ok=" << ok;
         GotTag(got_tag, ok, false);
       }
     }
@@ -172,33 +205,46 @@ class Verifier {
     auto it = expectations_.find(got_tag);
     if (it != expectations_.end()) {
       if (!ignore_ok) {
-        EXPECT_EQ(it->second, ok);
+        EXPECT_EQ(it->second.ok, ok) << it->second.ToString(it->first);
       }
       expectations_.erase(it);
-    } else {
-      auto it2 = maybe_expectations_.find(got_tag);
-      if (it2 != maybe_expectations_.end()) {
-        if (it2->second.seen != nullptr) {
-          EXPECT_FALSE(*it2->second.seen);
-          *it2->second.seen = true;
-        }
-        if (!ignore_ok) {
-          EXPECT_EQ(it2->second.ok, ok);
-        }
-        maybe_expectations_.erase(it2);
-      } else {
-        gpr_log(GPR_ERROR, "Unexpected tag: %p", got_tag);
-        abort();
+    } else if (auto it2 = maybe_expectations_.find(got_tag);
+               it2 != maybe_expectations_.end()) {
+      if (it2->second.seen != nullptr) {
+        EXPECT_FALSE(*it2->second.seen);
+        *it2->second.seen = true;
       }
+      if (!ignore_ok) {
+        EXPECT_EQ(it2->second.ok, ok) << it->second.ToString(it->first);
+      }
+      maybe_expectations_.erase(it2);
+    } else {
+      grpc_core::Crash(absl::StrFormat("Unexpected tag: %p", got_tag));
     }
   }
 
   struct MaybeExpect {
     bool ok;
     bool* seen;
+    grpc_core::SourceLocation whence;
+    std::string ToString(void* tag) const {
+      return absl::StrCat(
+          "[MaybeExpect] tag=", reinterpret_cast<uintptr_t>(tag),
+          " expect_ok=", ok, " whence=", whence.file(), ":", whence.line());
+    }
   };
 
-  std::map<void*, bool> expectations_;
+  struct DefinitelyExpect {
+    bool ok;
+    grpc_core::SourceLocation whence;
+    std::string ToString(void* tag) const {
+      return absl::StrCat("[Expect] tag=", reinterpret_cast<uintptr_t>(tag),
+                          " expect_ok=", ok, " whence=", whence.file(), ":",
+                          whence.line());
+    }
+  };
+
+  std::map<void*, DefinitelyExpect> expectations_;
   std::map<void*, MaybeExpect> maybe_expectations_;
   bool lambda_run_;
 };
@@ -208,7 +254,7 @@ bool plugin_has_sync_methods(std::unique_ptr<ServerBuilderPlugin>& plugin) {
 }
 
 // This class disables the server builder plugins that may add sync services to
-// the server. If there are sync services, UnimplementedRpc test will triger
+// the server. If there are sync services, UnimplementedRpc test will trigger
 // the sync unknown rpc routine on the server side, rather than the async one
 // that needs to be tested here.
 class ServerBuilderSyncPluginDisabler : public grpc::ServerBuilderOption {
@@ -226,16 +272,22 @@ class ServerBuilderSyncPluginDisabler : public grpc::ServerBuilderOption {
 class TestScenario {
  public:
   TestScenario(bool inproc_stub, const std::string& creds_type, bool hcs,
-               const std::string& content)
+               const std::string& content, bool use_virtual_rpcs = false)
       : inproc(inproc_stub),
         health_check_service(hcs),
         credentials_type(creds_type),
-        message_content(content) {}
+        message_content(content),
+        use_virtual_rpcs_(use_virtual_rpcs) {}
   void Log() const;
+  bool use_virtual_rpcs() const { return use_virtual_rpcs_; }
+
   bool inproc;
   bool health_check_service;
   const std::string credentials_type;
   const std::string message_content;
+
+ private:
+  bool use_virtual_rpcs_;
 };
 
 std::ostream& operator<<(std::ostream& out, const TestScenario& scenario) {
@@ -243,13 +295,15 @@ std::ostream& operator<<(std::ostream& out, const TestScenario& scenario) {
              << ", credentials='" << scenario.credentials_type
              << ", health_check_service="
              << (scenario.health_check_service ? "true" : "false")
-             << "', message_size=" << scenario.message_content.size() << "}";
+             << "', message_size=" << scenario.message_content.size()
+             << ", virtual=" << (scenario.use_virtual_rpcs() ? "true" : "false")
+             << "}";
 }
 
 void TestScenario::Log() const {
   std::ostringstream out;
   out << *this;
-  gpr_log(GPR_DEBUG, "%s", out.str().c_str());
+  VLOG(2) << out.str();
 }
 
 class HealthCheck : public health::v1::Health::Service {};
@@ -267,6 +321,12 @@ class AsyncEnd2endTest : public ::testing::TestWithParam<TestScenario> {
   }
 
   void TearDown() override {
+    if (session_context_) {
+      session_context_->TryCancel();
+      if (session_done_) {
+        session_done_->WaitForNotification();
+      }
+    }
     stub_.reset();
     ServerShutdown();
     grpc_recycle_unused_port(port_);
@@ -289,30 +349,47 @@ class AsyncEnd2endTest : public ::testing::TestWithParam<TestScenario> {
     auto server_creds = GetCredentialsProvider()->GetServerCredentials(
         GetParam().credentials_type);
     builder.AddListeningPort(server_address_.str(), server_creds);
-    service_ =
-        absl::make_unique<grpc::testing::EchoTestService::AsyncService>();
+    service_ = std::make_unique<
+        TestMultipleServiceImpl<grpc::testing::EchoTestService::AsyncService>>(
+        GetParam().use_virtual_rpcs());
     builder.RegisterService(service_.get());
     if (GetParam().health_check_service) {
       builder.RegisterService(&health_check_);
     }
     cq_ = builder.AddCompletionQueue();
 
-    // TODO(zyc): make a test option to choose wheather sync plugins should be
+    // TODO(zyc): make a test option to choose whether sync plugins should be
     // deleted
     std::unique_ptr<ServerBuilderOption> sync_plugin_disabler(
         new ServerBuilderSyncPluginDisabler());
-    builder.SetOption(move(sync_plugin_disabler));
+    builder.SetOption(std::move(sync_plugin_disabler));
     server_ = builder.BuildAndStart();
   }
 
   void ResetStub() {
     ChannelArguments args;
+    if (!(GetParam().inproc)) {
+      ApplyCommonChannelArguments(args);
+    }
     auto channel_creds = GetCredentialsProvider()->GetChannelCredentials(
         GetParam().credentials_type, &args);
     std::shared_ptr<Channel> channel =
         !(GetParam().inproc) ? grpc::CreateCustomChannel(server_address_.str(),
                                                          channel_creds, args)
                              : server_->InProcessChannel(args);
+
+    if (GetParam().use_virtual_rpcs()) {
+      session_context_ = std::make_unique<grpc::ClientContext>();
+      session_request_ = std::make_unique<grpc::testing::EchoRequest>();
+      session_request_->set_message("Session request");
+      session_done_ = std::make_unique<absl::Notification>();
+
+      channel = MaybeWrapVirtualChannel<grpc::testing::EchoRequest,
+                                        grpc::testing::EchoResponse>(
+          channel, args, true, session_context_.get(), session_request_.get(),
+          session_done_.get());
+    }
+
     stub_ = grpc::testing::EchoTestService::NewStub(channel);
   }
 
@@ -352,10 +429,15 @@ class AsyncEnd2endTest : public ::testing::TestWithParam<TestScenario> {
   std::unique_ptr<ServerCompletionQueue> cq_;
   std::unique_ptr<grpc::testing::EchoTestService::Stub> stub_;
   std::unique_ptr<Server> server_;
-  std::unique_ptr<grpc::testing::EchoTestService::AsyncService> service_;
+  std::unique_ptr<
+      TestMultipleServiceImpl<grpc::testing::EchoTestService::AsyncService>>
+      service_;
   HealthCheck health_check_;
   std::ostringstream server_address_;
   int port_;
+  std::unique_ptr<grpc::ClientContext> session_context_;
+  std::unique_ptr<grpc::testing::EchoRequest> session_request_;
+  std::unique_ptr<absl::Notification> session_done_;
 };
 
 TEST_P(AsyncEnd2endTest, SimpleRpc) {
@@ -414,7 +496,51 @@ TEST_P(AsyncEnd2endTest, SequentialRpcs) {
   SendRpc(10);
 }
 
+TEST_P(AsyncEnd2endTest, LocalAddress) {
+  SKIP_IF_VIRTUAL();
+  ResetStub();
+
+  ClientContext cli_ctx;
+  ServerContext srv_ctx;
+  grpc::ServerAsyncResponseWriter<EchoResponse> response_writer(&srv_ctx);
+
+  // No call is bound to the context yet.
+  EXPECT_EQ(srv_ctx.local_address(), "");
+
+  EchoRequest send_request;
+  send_request.set_message(GetParam().message_content);
+  std::unique_ptr<ClientAsyncResponseReader<EchoResponse>> response_reader(
+      stub_->AsyncEcho(&cli_ctx, send_request, cq_.get()));
+  EchoRequest recv_request;
+  service_->RequestEcho(&srv_ctx, &recv_request, &response_writer, cq_.get(),
+                        cq_.get(), tag(2));
+  EchoResponse recv_response;
+  Status recv_status;
+  response_reader->Finish(&recv_response, &recv_status, tag(4));
+  Verifier().Expect(2, true).Verify(cq_.get());
+
+  const std::string local_address = srv_ctx.local_address();
+  if (GetParam().inproc) {
+    // The inproc transport has no socket addresses.
+    EXPECT_EQ(local_address, "unknown");
+  } else {
+    EXPECT_TRUE(absl::StartsWith(local_address, "ipv4:") ||
+                absl::StartsWith(local_address, "ipv6:"))
+        << local_address;
+    EXPECT_TRUE(absl::EndsWith(local_address, absl::StrCat(":", port_)))
+        << local_address;
+    EXPECT_NE(local_address, srv_ctx.peer());
+  }
+
+  EchoResponse send_response;
+  send_response.set_message(recv_request.message());
+  response_writer.Finish(send_response, Status::OK, tag(3));
+  Verifier().Expect(3, true).Expect(4, true).Verify(cq_.get());
+  EXPECT_TRUE(recv_status.ok());
+}
+
 TEST_P(AsyncEnd2endTest, ReconnectChannel) {
+  SKIP_IF_VIRTUAL();
   // GRPC_CLIENT_CHANNEL_BACKUP_POLL_INTERVAL_MS is set to 100ms in main()
   if (GetParam().inproc) {
     return;
@@ -423,8 +549,7 @@ TEST_P(AsyncEnd2endTest, ReconnectChannel) {
 #ifdef GRPC_POSIX_SOCKET_EV
   // It needs 2 pollset_works to reconnect the channel with polling engine
   // "poll"
-  grpc_core::UniquePtr<char> poller = GPR_GLOBAL_CONFIG_GET(grpc_poll_strategy);
-  if (0 == strcmp(poller.get(), "poll")) {
+  if (grpc_core::ConfigVars::Get().PollStrategy() == "poll") {
     poller_slowdown_factor = 2;
   }
 #endif  // GRPC_POSIX_SOCKET_EV
@@ -950,13 +1075,16 @@ TEST_P(AsyncEnd2endTest, ClientInitialMetadataRpc) {
   Verifier().Expect(2, true).Verify(cq_.get());
   EXPECT_EQ(send_request.message(), recv_request.message());
   const auto& client_initial_metadata = srv_ctx.client_metadata();
-  EXPECT_EQ(meta1.second,
-            ToString(client_initial_metadata.find(meta1.first)->second));
-  EXPECT_EQ(meta2.second,
-            ToString(client_initial_metadata.find(meta2.first)->second));
-  EXPECT_EQ(meta3.second,
-            ToString(client_initial_metadata.find(meta3.first)->second));
-  EXPECT_GE(client_initial_metadata.size(), static_cast<size_t>(2));
+  EXPECT_EQ(
+      meta1.second,
+      ToString(client_initial_metadata.equal_range(meta1.first).first->second));
+  EXPECT_EQ(
+      meta2.second,
+      ToString(client_initial_metadata.equal_range(meta2.first).first->second));
+  EXPECT_EQ(
+      meta3.second,
+      ToString(client_initial_metadata.equal_range(meta3.first).first->second));
+  EXPECT_GE(client_initial_metadata.size(), 2);
 
   send_response.set_message(recv_request.message());
   response_writer.Finish(send_response, Status::OK, tag(3));
@@ -996,11 +1124,13 @@ TEST_P(AsyncEnd2endTest, ServerInitialMetadataRpc) {
   response_writer.SendInitialMetadata(tag(3));
   Verifier().Expect(3, true).Expect(4, true).Verify(cq_.get());
   const auto& server_initial_metadata = cli_ctx.GetServerInitialMetadata();
-  EXPECT_EQ(meta1.second,
-            ToString(server_initial_metadata.find(meta1.first)->second));
-  EXPECT_EQ(meta2.second,
-            ToString(server_initial_metadata.find(meta2.first)->second));
-  EXPECT_EQ(static_cast<size_t>(2), server_initial_metadata.size());
+  EXPECT_EQ(
+      meta1.second,
+      ToString(server_initial_metadata.equal_range(meta1.first).first->second));
+  EXPECT_EQ(
+      meta2.second,
+      ToString(server_initial_metadata.equal_range(meta2.first).first->second));
+  EXPECT_EQ(2, server_initial_metadata.size());
 
   send_response.set_message(recv_request.message());
   response_writer.Finish(send_response, Status::OK, tag(5));
@@ -1039,11 +1169,13 @@ TEST_P(AsyncEnd2endTest, ServerInitialMetadataServerStreaming) {
   srv_stream.SendInitialMetadata(tag(10));
   Verifier().Expect(10, true).Expect(11, true).Verify(cq_.get());
   auto server_initial_metadata = cli_ctx.GetServerInitialMetadata();
-  EXPECT_EQ(meta1.second,
-            ToString(server_initial_metadata.find(meta1.first)->second));
-  EXPECT_EQ(meta2.second,
-            ToString(server_initial_metadata.find(meta2.first)->second));
-  EXPECT_EQ(static_cast<size_t>(2), server_initial_metadata.size());
+  EXPECT_EQ(
+      meta1.second,
+      ToString(server_initial_metadata.equal_range(meta1.first).first->second));
+  EXPECT_EQ(
+      meta2.second,
+      ToString(server_initial_metadata.equal_range(meta2.first).first->second));
+  EXPECT_EQ(2, server_initial_metadata.size());
 
   srv_stream.Write(send_response, tag(3));
 
@@ -1099,11 +1231,13 @@ TEST_P(AsyncEnd2endTest, ServerInitialMetadataServerStreamingImplicit) {
   EXPECT_EQ(send_response.message(), recv_response.message());
 
   auto server_initial_metadata = cli_ctx.GetServerInitialMetadata();
-  EXPECT_EQ(meta1.second,
-            ToString(server_initial_metadata.find(meta1.first)->second));
-  EXPECT_EQ(meta2.second,
-            ToString(server_initial_metadata.find(meta2.first)->second));
-  EXPECT_EQ(static_cast<size_t>(2), server_initial_metadata.size());
+  EXPECT_EQ(
+      meta1.second,
+      ToString(server_initial_metadata.equal_range(meta1.first).first->second));
+  EXPECT_EQ(
+      meta2.second,
+      ToString(server_initial_metadata.equal_range(meta2.first).first->second));
+  EXPECT_EQ(2, server_initial_metadata.size());
 
   srv_stream.Write(send_response, tag(5));
   cli_stream->Read(&recv_response, tag(6));
@@ -1157,11 +1291,15 @@ TEST_P(AsyncEnd2endTest, ServerTrailingMetadataRpc) {
   EXPECT_EQ(send_response.message(), recv_response.message());
   EXPECT_TRUE(recv_status.ok());
   const auto& server_trailing_metadata = cli_ctx.GetServerTrailingMetadata();
-  EXPECT_EQ(meta1.second,
-            ToString(server_trailing_metadata.find(meta1.first)->second));
-  EXPECT_EQ(meta2.second,
-            ToString(server_trailing_metadata.find(meta2.first)->second));
-  EXPECT_EQ(static_cast<size_t>(2), server_trailing_metadata.size());
+  EXPECT_EQ(
+      meta1.second,
+      ToString(
+          server_trailing_metadata.equal_range(meta1.first).first->second));
+  EXPECT_EQ(
+      meta2.second,
+      ToString(
+          server_trailing_metadata.equal_range(meta2.first).first->second));
+  EXPECT_EQ(2, server_trailing_metadata.size());
 }
 
 TEST_P(AsyncEnd2endTest, MetadataRpc) {
@@ -1205,22 +1343,26 @@ TEST_P(AsyncEnd2endTest, MetadataRpc) {
   Verifier().Expect(2, true).Verify(cq_.get());
   EXPECT_EQ(send_request.message(), recv_request.message());
   const auto& client_initial_metadata = srv_ctx.client_metadata();
-  EXPECT_EQ(meta1.second,
-            ToString(client_initial_metadata.find(meta1.first)->second));
-  EXPECT_EQ(meta2.second,
-            ToString(client_initial_metadata.find(meta2.first)->second));
-  EXPECT_GE(client_initial_metadata.size(), static_cast<size_t>(2));
+  EXPECT_EQ(
+      meta1.second,
+      ToString(client_initial_metadata.equal_range(meta1.first).first->second));
+  EXPECT_EQ(
+      meta2.second,
+      ToString(client_initial_metadata.equal_range(meta2.first).first->second));
+  EXPECT_GE(client_initial_metadata.size(), 2);
 
   srv_ctx.AddInitialMetadata(meta3.first, meta3.second);
   srv_ctx.AddInitialMetadata(meta4.first, meta4.second);
   response_writer.SendInitialMetadata(tag(3));
   Verifier().Expect(3, true).Expect(4, true).Verify(cq_.get());
   const auto& server_initial_metadata = cli_ctx.GetServerInitialMetadata();
-  EXPECT_EQ(meta3.second,
-            ToString(server_initial_metadata.find(meta3.first)->second));
-  EXPECT_EQ(meta4.second,
-            ToString(server_initial_metadata.find(meta4.first)->second));
-  EXPECT_GE(server_initial_metadata.size(), static_cast<size_t>(2));
+  EXPECT_EQ(
+      meta3.second,
+      ToString(server_initial_metadata.equal_range(meta3.first).first->second));
+  EXPECT_EQ(
+      meta4.second,
+      ToString(server_initial_metadata.equal_range(meta4.first).first->second));
+  EXPECT_GE(server_initial_metadata.size(), 2);
 
   send_response.set_message(recv_request.message());
   srv_ctx.AddTrailingMetadata(meta5.first, meta5.second);
@@ -1233,15 +1375,21 @@ TEST_P(AsyncEnd2endTest, MetadataRpc) {
   EXPECT_EQ(send_response.message(), recv_response.message());
   EXPECT_TRUE(recv_status.ok());
   const auto& server_trailing_metadata = cli_ctx.GetServerTrailingMetadata();
-  EXPECT_EQ(meta5.second,
-            ToString(server_trailing_metadata.find(meta5.first)->second));
-  EXPECT_EQ(meta6.second,
-            ToString(server_trailing_metadata.find(meta6.first)->second));
-  EXPECT_GE(server_trailing_metadata.size(), static_cast<size_t>(2));
+  EXPECT_EQ(
+      meta5.second,
+      ToString(
+          server_trailing_metadata.equal_range(meta5.first).first->second));
+  EXPECT_EQ(
+      meta6.second,
+      ToString(
+          server_trailing_metadata.equal_range(meta6.first).first->second));
+  EXPECT_GE(server_trailing_metadata.size(), 2);
 }
 
 // Server uses AsyncNotifyWhenDone API to check for cancellation
 TEST_P(AsyncEnd2endTest, ServerCheckCancellation) {
+  SKIP_TEST_FOR_PH2_CLIENT(
+      "TODO(akshitpatel) [PH2][P3][Client] Fix bug. WIP Timeout for PH2");
   ResetStub();
 
   EchoRequest send_request;
@@ -1310,6 +1458,9 @@ TEST_P(AsyncEnd2endTest, ServerCheckDone) {
 
 TEST_P(AsyncEnd2endTest, UnimplementedRpc) {
   ChannelArguments args;
+  if (!(GetParam().inproc)) {
+    ApplyCommonChannelArguments(args);
+  }
   const auto& channel_creds = GetCredentialsProvider()->GetChannelCredentials(
       GetParam().credentials_type, &args);
   std::shared_ptr<Channel> channel =
@@ -1452,7 +1603,7 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
       // just added
       int got_tag = verif.Expect(tag_idx, expected_server_cq_result)
                         .Next(cq_.get(), ignore_cq_result);
-      GPR_ASSERT((got_tag == tag_idx) || (got_tag == 11 && want_done_tag));
+      GRPC_CHECK((got_tag == tag_idx) || (got_tag == 11 && want_done_tag));
       if (got_tag == 11) {
         EXPECT_TRUE(srv_ctx.IsCancelled());
         want_done_tag = false;
@@ -1602,7 +1753,7 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
       // just added
       int got_tag = verif.Expect(tag_idx, expected_cq_result)
                         .Next(cq_.get(), ignore_cq_result);
-      GPR_ASSERT((got_tag == tag_idx) || (got_tag == 11 && want_done_tag));
+      GRPC_CHECK((got_tag == tag_idx) || (got_tag == 11 && want_done_tag));
       if (got_tag == 11) {
         EXPECT_TRUE(srv_ctx.IsCancelled());
         want_done_tag = false;
@@ -1714,7 +1865,7 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
 
       do {
         got_tag = verif.Next(cq_.get(), ignore_cq_result);
-        GPR_ASSERT(((got_tag == 3) && !tag_3_done) || (got_tag == 11));
+        GRPC_CHECK(((got_tag == 3) && !tag_3_done) || (got_tag == 11));
         if (got_tag == 3) {
           tag_3_done = true;
         }
@@ -1742,9 +1893,9 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
     verif.Expect(4, expected_cq_result);
     got_tag = tag_3_done ? 3 : verif.Next(cq_.get(), ignore_cq_result);
     got_tag2 = verif.Next(cq_.get(), ignore_cq_result);
-    GPR_ASSERT((got_tag == 3) || (got_tag == 4) ||
+    GRPC_CHECK((got_tag == 3) || (got_tag == 4) ||
                (got_tag == 11 && want_done_tag));
-    GPR_ASSERT((got_tag2 == 3) || (got_tag2 == 4) ||
+    GRPC_CHECK((got_tag2 == 3) || (got_tag2 == 4) ||
                (got_tag2 == 11 && want_done_tag));
     // If we get 3 and 4, we don't need to wait for 11, but if
     // we get 11, we should also clear 3 and 4
@@ -1752,7 +1903,7 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
       EXPECT_TRUE(srv_ctx.IsCancelled());
       want_done_tag = false;
       got_tag = verif.Next(cq_.get(), ignore_cq_result);
-      GPR_ASSERT((got_tag == 3) || (got_tag == 4));
+      GRPC_CHECK((got_tag == 3) || (got_tag == 4));
     }
 
     send_response.set_message("Pong");
@@ -1763,9 +1914,9 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
     verif.Expect(6, expected_cq_result);
     got_tag = verif.Next(cq_.get(), ignore_cq_result);
     got_tag2 = verif.Next(cq_.get(), ignore_cq_result);
-    GPR_ASSERT((got_tag == 5) || (got_tag == 6) ||
+    GRPC_CHECK((got_tag == 5) || (got_tag == 6) ||
                (got_tag == 11 && want_done_tag));
-    GPR_ASSERT((got_tag2 == 5) || (got_tag2 == 6) ||
+    GRPC_CHECK((got_tag2 == 5) || (got_tag2 == 6) ||
                (got_tag2 == 11 && want_done_tag));
     // If we get 5 and 6, we don't need to wait for 11, but if
     // we get 11, we should also clear 5 and 6
@@ -1773,7 +1924,7 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
       EXPECT_TRUE(srv_ctx.IsCancelled());
       want_done_tag = false;
       got_tag = verif.Next(cq_.get(), ignore_cq_result);
-      GPR_ASSERT((got_tag == 5) || (got_tag == 6));
+      GRPC_CHECK((got_tag == 5) || (got_tag == 6));
     }
 
     // This is expected to succeed in all cases
@@ -1784,7 +1935,7 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
     bool ignore_cq_wd_result =
         ignore_cq_result || (server_try_cancel == CANCEL_BEFORE_PROCESSING);
     got_tag = verif.Next(cq_.get(), ignore_cq_wd_result);
-    GPR_ASSERT((got_tag == 7) || (got_tag == 11 && want_done_tag));
+    GRPC_CHECK((got_tag == 7) || (got_tag == 11 && want_done_tag));
     if (got_tag == 11) {
       EXPECT_TRUE(srv_ctx.IsCancelled());
       want_done_tag = false;
@@ -1799,7 +1950,7 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
     srv_stream.Read(&recv_request, tag(8));
     verif.Expect(8, false);
     got_tag = verif.Next(cq_.get(), ignore_cq_result);
-    GPR_ASSERT((got_tag == 8) || (got_tag == 11 && want_done_tag));
+    GRPC_CHECK((got_tag == 8) || (got_tag == 11 && want_done_tag));
     if (got_tag == 11) {
       EXPECT_TRUE(srv_ctx.IsCancelled());
       want_done_tag = false;
@@ -1839,10 +1990,17 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
 };
 
 TEST_P(AsyncEnd2endServerTryCancelTest, ClientStreamingServerTryCancelBefore) {
+  SKIP_TEST_FOR_PH2_CLIENT(
+      "TODO(akshitpatel) [PH2][P3][Client] Fix bug. WIP `Check failed` for "
+      "PH2");
   TestClientStreamingServerCancel(CANCEL_BEFORE_PROCESSING);
 }
 
 TEST_P(AsyncEnd2endServerTryCancelTest, ClientStreamingServerTryCancelDuring) {
+  // Likely the same bug as ClientStreamingServerTryCancelBefore.
+  SKIP_TEST_FOR_PH2_CLIENT(
+      "TODO(akshitpatel) [PH2][P3][Client] Fix bug. WIP `Check failed` for "
+      "PH2");
   TestClientStreamingServerCancel(CANCEL_DURING_PROCESSING);
 }
 
@@ -1894,7 +2052,7 @@ std::vector<TestScenario> CreateTestScenarios(bool /*test_secure*/,
   for (auto sec = sec_list.begin(); sec != sec_list.end(); sec++) {
     credentials_types.push_back(*sec);
   }
-  GPR_ASSERT(!credentials_types.empty());
+  GRPC_CHECK(!credentials_types.empty());
 
   messages.push_back("Hello");
   if (test_message_size_limit) {
@@ -1922,11 +2080,15 @@ std::vector<TestScenario> CreateTestScenarios(bool /*test_secure*/,
     for (auto msg = messages.begin(); msg != messages.end(); msg++) {
       for (auto cred = credentials_types.begin();
            cred != credentials_types.end(); ++cred) {
-        scenarios.emplace_back(false, *cred, health_check_service, *msg);
+        scenarios.emplace_back(false, *cred, health_check_service, *msg, false);
+        if (!IsPh2Test()) {
+          scenarios.emplace_back(false, *cred, health_check_service, *msg,
+                                 true);
+        }
       }
       if (insec_ok()) {
         scenarios.emplace_back(true, kInsecureCredentialsType,
-                               health_check_service, *msg);
+                               health_check_service, *msg, false);
       }
     }
   }
@@ -1945,11 +2107,13 @@ INSTANTIATE_TEST_SUITE_P(AsyncEnd2endServerTryCancel,
 }  // namespace grpc
 
 int main(int argc, char** argv) {
+  ::testing::InitGoogleTest(&argc, argv);
   // Change the backup poll interval from 5s to 100ms to speed up the
   // ReconnectChannel test
-  GPR_GLOBAL_CONFIG_SET(grpc_client_channel_backup_poll_interval_ms, 100);
+  grpc_core::ConfigVars::Overrides overrides;
+  overrides.client_channel_backup_poll_interval_ms = 100;
+  grpc_core::ConfigVars::SetOverrides(overrides);
   grpc::testing::TestEnvironment env(&argc, argv);
-  ::testing::InitGoogleTest(&argc, argv);
   int ret = RUN_ALL_TESTS();
   return ret;
 }

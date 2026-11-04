@@ -1,20 +1,28 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
+
+#include <grpc/grpc.h>
+#include <grpc/support/alloc.h>
+#include <grpc/support/time.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/client_context.h>
+#include <grpcpp/server.h>
+#include <grpcpp/server_builder.h>
 
 #include <chrono>
 #include <memory>
@@ -24,20 +32,13 @@
 #include <thread>
 #include <vector>
 
-#include <grpc/grpc.h>
-#include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
-#include <grpc/support/time.h>
-#include <grpcpp/channel.h>
-#include <grpcpp/client_context.h>
-#include <grpcpp/server.h>
-#include <grpcpp/server_builder.h>
-
-#include "src/core/lib/profiling/timers.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/grpc_check.h"
 #include "src/proto/grpc/testing/benchmark_service.grpc.pb.h"
 #include "test/cpp/qps/client.h"
 #include "test/cpp/qps/interarrival.h"
 #include "test/cpp/qps/usage_timer.h"
+#include "absl/log/log.h"
 
 namespace grpc {
 namespace testing {
@@ -96,7 +97,7 @@ class SynchronousClient
           return true;
         } else {
           gpr_sleep_until(one_sec_delay);
-          if (gpr_atm_acq_load(&thread_pool_done_) != static_cast<gpr_atm>(0)) {
+          if (gpr_atm_acq_load(&thread_pool_done_) != gpr_atm{0}) {
             return false;
           }
         }
@@ -125,7 +126,6 @@ class SynchronousUnaryClient final : public SynchronousClient {
     }
     auto* stub = channels_[thread_idx % channels_.size()].get_stub();
     double start = UsageTimer::Now();
-    GPR_TIMER_SCOPE("SynchronousUnaryClient::ThreadFunc", 0);
     grpc::ClientContext context;
     grpc::Status s =
         stub->UnaryCall(&context, request_, &responses_[thread_idx]);
@@ -174,15 +174,19 @@ class SynchronousStreamingClient : public SynchronousClient {
   const int messages_per_stream_;
   std::vector<int> messages_issued_;
 
-  void FinishStream(HistogramEntry* entry, size_t thread_idx) {
+  Status FinishStream(HistogramEntry* entry, size_t thread_idx) {
     Status s = stream_[thread_idx]->Finish();
     // don't set the value since the stream is failed and shouldn't be timed
     entry->set_status(s.error_code());
+    return s;
+  }
+
+  void LogErrorAndResetContext(const Status& s, size_t thread_idx) {
     if (!s.ok()) {
       std::lock_guard<std::mutex> l(stream_mu_[thread_idx]);
       if (!shutdown_[thread_idx].val) {
-        gpr_log(GPR_ERROR, "Stream %" PRIuPTR " received an error %s",
-                thread_idx, s.error_message().c_str());
+        LOG(ERROR) << "Stream " << thread_idx << " received an error "
+                   << s.error_message();
       }
     }
     // Lock the stream_mu_ now because the client context could change
@@ -243,7 +247,6 @@ class SynchronousStreamingPingPongClient final
     if (!WaitToIssue(thread_idx)) {
       return true;
     }
-    GPR_TIMER_SCOPE("SynchronousStreamingPingPongClient::ThreadFunc", 0);
     double start = UsageTimer::Now();
     if (stream_[thread_idx]->Write(request_) &&
         stream_[thread_idx]->Read(&responses_[thread_idx])) {
@@ -259,7 +262,8 @@ class SynchronousStreamingPingPongClient final
       }
     }
     stream_[thread_idx]->WritesDone();
-    FinishStream(entry, thread_idx);
+    Status s = FinishStream(entry, thread_idx);
+    LogErrorAndResetContext(s, thread_idx);
     auto* stub = channels_[thread_idx % channels_.size()].get_stub();
     std::lock_guard<std::mutex> l(stream_mu_[thread_idx]);
     if (!shutdown_[thread_idx].val) {
@@ -304,7 +308,6 @@ class SynchronousStreamingFromClientClient final
     if (!WaitToIssue(thread_idx)) {
       return true;
     }
-    GPR_TIMER_SCOPE("SynchronousStreamingFromClientClient::ThreadFunc", 0);
     if (stream_[thread_idx]->Write(request_)) {
       double now = UsageTimer::Now();
       entry->set_value((now - last_issue_[thread_idx]) * 1e9);
@@ -312,7 +315,8 @@ class SynchronousStreamingFromClientClient final
       return true;
     }
     stream_[thread_idx]->WritesDone();
-    FinishStream(entry, thread_idx);
+    Status s = FinishStream(entry, thread_idx);
+    LogErrorAndResetContext(s, thread_idx);
     auto* stub = channels_[thread_idx % channels_.size()].get_stub();
     std::lock_guard<std::mutex> l(stream_mu_[thread_idx]);
     if (!shutdown_[thread_idx].val) {
@@ -330,12 +334,10 @@ class SynchronousStreamingFromServerClient final
     : public SynchronousStreamingClient<grpc::ClientReader<SimpleResponse>> {
  public:
   explicit SynchronousStreamingFromServerClient(const ClientConfig& config)
-      : SynchronousStreamingClient(config), last_recv_(num_threads_) {}
+      : SynchronousStreamingClient(config) {}
   ~SynchronousStreamingFromServerClient() override {}
 
  private:
-  std::vector<double> last_recv_;
-
   bool InitThreadFuncImpl(size_t thread_idx) override {
     auto* stub = channels_[thread_idx % channels_.size()].get_stub();
     std::lock_guard<std::mutex> l(stream_mu_[thread_idx]);
@@ -345,19 +347,20 @@ class SynchronousStreamingFromServerClient final
     } else {
       return false;
     }
-    last_recv_[thread_idx] = UsageTimer::Now();
     return true;
   }
 
   bool ThreadFuncImpl(HistogramEntry* entry, size_t thread_idx) override {
-    GPR_TIMER_SCOPE("SynchronousStreamingFromServerClient::ThreadFunc", 0);
+    double start = UsageTimer::Now();
     if (stream_[thread_idx]->Read(&responses_[thread_idx])) {
-      double now = UsageTimer::Now();
-      entry->set_value((now - last_recv_[thread_idx]) * 1e9);
-      last_recv_[thread_idx] = now;
+      entry->set_value((UsageTimer::Now() - start) * 1e9);
       return true;
     }
-    FinishStream(entry, thread_idx);
+    Status s = FinishStream(entry, thread_idx);
+    LogErrorAndResetContext(s, thread_idx);
+    if (!WaitToIssue(thread_idx)) {
+      return true;
+    }
     auto* stub = channels_[thread_idx % channels_.size()].get_stub();
     std::lock_guard<std::mutex> l(stream_mu_[thread_idx]);
     if (!shutdown_[thread_idx].val) {
@@ -402,7 +405,7 @@ class SynchronousStreamingBothWaysClient final
 };
 
 std::unique_ptr<Client> CreateSynchronousClient(const ClientConfig& config) {
-  GPR_ASSERT(!config.use_coalesce_api());  // not supported yet.
+  GRPC_CHECK(!config.use_coalesce_api());  // not supported yet.
   switch (config.rpc_type()) {
     case UNARY:
       return std::unique_ptr<Client>(new SynchronousUnaryClient(config));

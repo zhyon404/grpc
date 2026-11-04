@@ -63,7 +63,8 @@ PROTOC_PACKAGES=(
 
 # C#
 UNZIPPED_CSHARP_PACKAGES=$(mktemp -d)
-unzip "$INPUT_ARTIFACTS/csharp_nugets_windows_dotnetcli.zip" -d "$UNZIPPED_CSHARP_PACKAGES"
+# the "_multiplatform" suffix is to fix https://github.com/grpc/grpc/issues/32179
+unzip "$INPUT_ARTIFACTS/csharp_nugets_windows_dotnetcli_multiplatform.zip" -d "$UNZIPPED_CSHARP_PACKAGES"
 CSHARP_PACKAGES=(
   "$UNZIPPED_CSHARP_PACKAGES"/*
   "$INPUT_ARTIFACTS"/grpc_unity_package.[0-9]*.zip
@@ -160,7 +161,7 @@ OLD_INDEX=$(mktemp)
 NEW_INDEX=$(mktemp)
 
 # Download the current /index.xml into $OLD_INDEX
-gsutil cp "$GCS_INDEX" "$OLD_INDEX"
+gcloud storage cp "$GCS_INDEX" "$OLD_INDEX"
 
 {
   # we want to add an entry as the first child under <builds> tag
@@ -223,17 +224,17 @@ EOF
 }
 
 # Upload the current build artifacts
-gsutil -m cp -r "$LOCAL_STAGING_TEMPDIR/${BUILD_RELPATH%%/*}" "$GCS_ARCHIVE_ROOT"
+gcloud storage cp --recursive "$LOCAL_STAGING_TEMPDIR/${BUILD_RELPATH%%/*}" "$GCS_ARCHIVE_ROOT"
 # Upload directory indices for subdirectories
 (
   cd "$LOCAL_BUILD_ROOT"
   find * -type d | while read -r directory
   do
-    generate_directory_index "$directory" | gsutil -h 'Content-Type:text/html' cp - "$GCS_ARCHIVE_ROOT$BUILD_RELPATH$directory/$INDEX_FILENAME"
+    generate_directory_index "$directory" | gcloud storage cp --content-type='text/html' - "$GCS_ARCHIVE_ROOT$BUILD_RELPATH$directory/$INDEX_FILENAME"
   done
 )
 # Upload the new /index.xml
-gsutil -h "Content-Type:application/xml" cp "$NEW_INDEX" "$GCS_INDEX"
+gcloud storage cp --content-type="application/xml" "$NEW_INDEX" "$GCS_INDEX"
 
 # Upload C# nugets to the dev nuget feed
 pushd "$UNZIPPED_CSHARP_PACKAGES"

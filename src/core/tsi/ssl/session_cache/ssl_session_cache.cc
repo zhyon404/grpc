@@ -1,31 +1,32 @@
-/*
- *
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <grpc/support/port_platform.h>
+//
+//
+// Copyright 2018 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "src/core/tsi/ssl/session_cache/ssl_session_cache.h"
 
-#include <grpc/support/log.h>
+#include <grpc/support/port_platform.h>
 #include <grpc/support/string_util.h>
 
-#include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/slice/slice_internal.h"
 #include "src/core/tsi/ssl/session_cache/ssl_session.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/grpc_check.h"
+#include "src/core/util/sync.h"
+#include "absl/log/log.h"
 
 namespace tsi {
 
@@ -61,7 +62,10 @@ class SslSessionLRUCache::Node {
 };
 
 SslSessionLRUCache::SslSessionLRUCache(size_t capacity) : capacity_(capacity) {
-  GPR_ASSERT(capacity > 0);
+  if (capacity == 0) {
+    LOG(ERROR) << "SslSessionLRUCache capacity is zero. SSL sessions cannot be "
+                  "resumed.";
+  }
 }
 
 SslSessionLRUCache::~SslSessionLRUCache() {
@@ -74,7 +78,7 @@ SslSessionLRUCache::~SslSessionLRUCache() {
 }
 
 size_t SslSessionLRUCache::Size() {
-  grpc_core::MutexLock lock(&lock_);
+  grpc_core::MutexLock lock(lock_);
   return use_order_list_size_;
 }
 
@@ -93,7 +97,11 @@ SslSessionLRUCache::Node* SslSessionLRUCache::FindLocked(
 }
 
 void SslSessionLRUCache::Put(const char* key, SslSessionPtr session) {
-  grpc_core::MutexLock lock(&lock_);
+  if (session == nullptr) {
+    LOG(ERROR) << "Attempted to put null SSL session in session cache.";
+    return;
+  }
+  grpc_core::MutexLock lock(lock_);
   Node* node = FindLocked(key);
   if (node != nullptr) {
     node->SetSession(std::move(session));
@@ -104,7 +112,7 @@ void SslSessionLRUCache::Put(const char* key, SslSessionPtr session) {
   entry_by_key_.emplace(key, node);
   AssertInvariants();
   if (use_order_list_size_ > capacity_) {
-    GPR_ASSERT(use_order_list_tail_);
+    GRPC_CHECK(use_order_list_tail_);
     node = use_order_list_tail_;
     Remove(node);
     // Order matters, key is destroyed after deleting node.
@@ -115,7 +123,7 @@ void SslSessionLRUCache::Put(const char* key, SslSessionPtr session) {
 }
 
 SslSessionPtr SslSessionLRUCache::Get(const char* key) {
-  grpc_core::MutexLock lock(&lock_);
+  grpc_core::MutexLock lock(lock_);
   // Key is only used for lookups.
   Node* node = FindLocked(key);
   if (node == nullptr) {
@@ -135,7 +143,7 @@ void SslSessionLRUCache::Remove(SslSessionLRUCache::Node* node) {
   } else {
     node->next_->prev_ = node->prev_;
   }
-  GPR_ASSERT(use_order_list_size_ >= 1);
+  GRPC_CHECK_GE(use_order_list_size_, 1u);
   use_order_list_size_--;
 }
 
@@ -161,16 +169,16 @@ void SslSessionLRUCache::AssertInvariants() {
   Node* current = use_order_list_head_;
   while (current != nullptr) {
     size++;
-    GPR_ASSERT(current->prev_ == prev);
+    GRPC_CHECK(current->prev_ == prev);
     auto it = entry_by_key_.find(current->key());
-    GPR_ASSERT(it != entry_by_key_.end());
-    GPR_ASSERT(it->second == current);
+    GRPC_CHECK(it != entry_by_key_.end());
+    GRPC_CHECK(it->second == current);
     prev = current;
     current = current->next_;
   }
-  GPR_ASSERT(prev == use_order_list_tail_);
-  GPR_ASSERT(size == use_order_list_size_);
-  GPR_ASSERT(entry_by_key_.size() == use_order_list_size_);
+  GRPC_CHECK(prev == use_order_list_tail_);
+  GRPC_CHECK(size == use_order_list_size_);
+  GRPC_CHECK(entry_by_key_.size() == use_order_list_size_);
 }
 #else
 void SslSessionLRUCache::AssertInvariants() {}

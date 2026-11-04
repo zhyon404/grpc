@@ -14,14 +14,20 @@
 
 #include "src/core/lib/promise/activity.h"
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
+#include <stdlib.h>
+
+#include <functional>
+#include <tuple>
+#include <variant>
 
 #include "src/core/lib/promise/join.h"
+#include "src/core/lib/promise/poll.h"
 #include "src/core/lib/promise/promise.h"
 #include "src/core/lib/promise/seq.h"
 #include "src/core/lib/promise/wait_set.h"
 #include "test/core/promise/test_wakeup_schedulers.h"
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 
 using testing::_;
 using testing::Mock;
@@ -38,20 +44,20 @@ class Barrier {
 
   Promise<Result> Wait() {
     return [this]() -> Poll<Result> {
-      MutexLock lock(&mu_);
+      MutexLock lock(mu_);
       if (cleared_) {
         return Result{};
       } else {
-        return wait_set_.AddPending(Activity::current()->MakeOwningWaker());
+        return wait_set_.AddPending(GetContext<Activity>()->MakeOwningWaker());
       }
     };
   }
 
   void Clear() {
-    mu_.Lock();
+    mu_.lock();
     cleared_ = true;
     auto wakeup = wait_set_.TakeWakeupSet();
-    mu_.Unlock();
+    mu_.unlock();
     wakeup.Wakeup();
   }
 
@@ -69,21 +75,21 @@ class SingleBarrier {
 
   Promise<Result> Wait() {
     return [this]() -> Poll<Result> {
-      MutexLock lock(&mu_);
+      MutexLock lock(mu_);
       if (cleared_) {
         return Result{};
       } else {
-        waker_ = Activity::current()->MakeOwningWaker();
+        waker_ = GetContext<Activity>()->MakeOwningWaker();
         return Pending();
       }
     };
   }
 
   void Clear() {
-    mu_.Lock();
+    mu_.lock();
     cleared_ = true;
     auto waker = std::move(waker_);
-    mu_.Unlock();
+    mu_.unlock();
     waker.Wakeup();
   }
 
@@ -119,12 +125,12 @@ TEST(ActivityTest, DropImmediately) {
 }
 
 template <typename B>
-class BarrierTest : public testing::Test {
+class BarrierTest : public ::testing::Test {
  public:
   using Type = B;
 };
 
-using BarrierTestTypes = testing::Types<Barrier, SingleBarrier>;
+using BarrierTestTypes = ::testing::Types<Barrier, SingleBarrier>;
 TYPED_TEST_SUITE(BarrierTest, BarrierTestTypes);
 
 TYPED_TEST(BarrierTest, Barrier) {

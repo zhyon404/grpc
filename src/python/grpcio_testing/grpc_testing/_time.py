@@ -41,19 +41,22 @@ def _call_in_thread(behaviors):
     calling.join()
 
 
-class _State(object):
-
+class _State:
     def __init__(self):
         self.condition = threading.Condition()
         self.times_to_behaviors = collections.defaultdict(list)
 
 
 class _Delta(
-        collections.namedtuple('_Delta', (
-            'mature_behaviors',
-            'earliest_mature_time',
-            'earliest_immature_time',
-        ))):
+    collections.namedtuple(
+        "_Delta",
+        (
+            "mature_behaviors",
+            "earliest_mature_time",
+            "earliest_immature_time",
+        ),
+    )
+):
     pass
 
 
@@ -66,19 +69,20 @@ def _process(state, now):
             if earliest_mature_time is None:
                 earliest_mature_time = earliest_time
             earliest_mature_behaviors = state.times_to_behaviors.pop(
-                earliest_time)
+                earliest_time
+            )
             mature_behaviors.extend(earliest_mature_behaviors)
         else:
             earliest_immature_time = earliest_time
             break
     else:
         earliest_immature_time = None
-    return _Delta(mature_behaviors, earliest_mature_time,
-                  earliest_immature_time)
+    return _Delta(
+        mature_behaviors, earliest_mature_time, earliest_immature_time
+    )
 
 
 class _Future(grpc.Future):
-
     def __init__(self, state, behavior, time):
         self._state = state
         self._behavior = behavior
@@ -89,18 +93,15 @@ class _Future(grpc.Future):
         with self._state.condition:
             if self._cancelled:
                 return True
-            else:
-                behaviors_at_time = self._state.times_to_behaviors.get(
-                    self._time)
-                if behaviors_at_time is None:
-                    return False
-                else:
-                    behaviors_at_time.remove(self._behavior)
-                    if not behaviors_at_time:
-                        self._state.times_to_behaviors.pop(self._time)
-                        self._state.condition.notify_all()
-                    self._cancelled = True
-                    return True
+            behaviors_at_time = self._state.times_to_behaviors.get(self._time)
+            if behaviors_at_time is None:
+                return False
+            behaviors_at_time.remove(self._behavior)
+            if not behaviors_at_time:
+                self._state.times_to_behaviors.pop(self._time)
+                self._state.condition.notify_all()
+            self._cancelled = True
+            return True
 
     def cancelled(self):
         with self._state.condition:
@@ -126,7 +127,6 @@ class _Future(grpc.Future):
 
 
 class StrictRealTime(grpc_testing.Time):
-
     def __init__(self):
         self._state = _State()
         self._active = False
@@ -146,16 +146,16 @@ class StrictRealTime(grpc_testing.Time):
                     if delta.earliest_immature_time is None:
                         self._active = False
                         return
-                    else:
-                        timeout = max(0, delta.earliest_immature_time - now)
-                        self._state.condition.wait(timeout=timeout)
+                    timeout = max(0, delta.earliest_immature_time - now)
+                    self._state.condition.wait(timeout=timeout)
             _call(delta.mature_behaviors)
 
     def _ensure_called_through(self, time):
         with self._state.condition:
-            while ((self._state.times_to_behaviors and
-                    min(self._state.times_to_behaviors) < time) or
-                   (self._calling is not None and self._calling < time)):
+            while (
+                self._state.times_to_behaviors
+                and min(self._state.times_to_behaviors) < time
+            ) or (self._calling is not None and self._calling < time):
                 self._state.condition.wait()
 
     def _call_at(self, behavior, time):
@@ -189,7 +189,6 @@ class StrictRealTime(grpc_testing.Time):
 
 
 class StrictFakeTime(grpc_testing.Time):
-
     def __init__(self, time):
         self._state = _State()
         self._time = time
@@ -215,7 +214,7 @@ class StrictFakeTime(grpc_testing.Time):
         return _Future(self._state, behavior, time)
 
     def sleep_for(self, duration):
-        if 0 < duration:
+        if duration > 0:
             with self._state.condition:
                 self._time += duration
                 delta = _process(self._state, self._time)

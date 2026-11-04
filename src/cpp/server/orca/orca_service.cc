@@ -14,17 +14,42 @@
 // limitations under the License.
 //
 
+#include "src/cpp/server/orca/orca_service.h"
+
+#include <grpc/event_engine/event_engine.h>
+#include <grpcpp/ext/orca_service.h>
+#include <grpcpp/ext/server_metric_recorder.h>
+#include <grpcpp/impl/rpc_method.h>
+#include <grpcpp/impl/rpc_service_method.h>
+#include <grpcpp/impl/server_callback_handlers.h>
+#include <grpcpp/impl/sync.h>
+#include <grpcpp/server_context.h>
+#include <grpcpp/support/byte_buffer.h>
+#include <grpcpp/support/server_callback.h>
+#include <grpcpp/support/slice.h>
+#include <grpcpp/support/status.h>
+#include <stddef.h>
+
+#include <map>
+#include <memory>
+#include <optional>
+#include <utility>
+
 #include "google/protobuf/duration.upb.h"
-#include "upb/upb.hpp"
+#include "src/core/lib/event_engine/default_event_engine.h"
+#include "src/core/lib/iomgr/exec_ctx.h"
+#include "src/core/load_balancing/backend_metric_data.h"
+#include "src/core/util/debug_location.h"
+#include "src/core/util/grpc_check.h"
+#include "src/core/util/time.h"
+#include "src/cpp/server/backend_metric_recorder.h"
+#include "upb/base/string_view.h"
+#include "upb/mem/arena.hpp"
 #include "xds/data/orca/v3/orca_load_report.upb.h"
 #include "xds/service/orca/v3/orca.upb.h"
-
-#include <grpcpp/ext/orca_service.h>
-#include <grpcpp/impl/codegen/server_callback_handlers.h>
-
-#include "src/core/lib/gprpp/ref_counted.h"
-#include "src/core/lib/gprpp/time.h"
-#include "src/core/lib/iomgr/timer.h"
+#include "absl/log/log.h"
+#include "absl/strings/string_view.h"
+#include "absl/time/time.h"
 
 namespace grpc {
 namespace experimental {
@@ -33,190 +58,173 @@ namespace experimental {
 // OrcaService::Reactor
 //
 
-class OrcaService::Reactor : public ServerWriteReactor<ByteBuffer>,
-                             public grpc_core::RefCounted<Reactor> {
- public:
-  explicit Reactor(OrcaService* service, const ByteBuffer* request_buffer)
-      : service_(service) {
-    GRPC_CLOSURE_INIT(&on_timer_, OnTimer, this, nullptr);
-    // Get slice from request.
-    Slice slice;
-    GPR_ASSERT(request_buffer->DumpToSingleSlice(&slice).ok());
-    // Parse request proto.
-    upb::Arena arena;
-    xds_service_orca_v3_OrcaLoadReportRequest* request =
-        xds_service_orca_v3_OrcaLoadReportRequest_parse(
-            reinterpret_cast<const char*>(slice.begin()), slice.size(),
-            arena.ptr());
-    if (request == nullptr) {
-      Finish(Status(StatusCode::INTERNAL, "could not parse request proto"));
-      return;
-    }
-    const auto* duration_proto =
-        xds_service_orca_v3_OrcaLoadReportRequest_report_interval(request);
-    if (duration_proto != nullptr) {
-      report_interval_ = grpc_core::Duration::FromSecondsAndNanoseconds(
-          google_protobuf_Duration_seconds(duration_proto),
-          google_protobuf_Duration_nanos(duration_proto));
-    }
-    auto min_interval = grpc_core::Duration::Milliseconds(
-        service_->min_report_duration_ / absl::Milliseconds(1));
-    if (report_interval_ < min_interval) report_interval_ = min_interval;
-    // Send initial response.
-    SendResponse();
+OrcaService::Reactor::Reactor(OrcaService* service, absl::string_view peer,
+                              const ByteBuffer* request_buffer,
+                              std::shared_ptr<ReactorHook> hook)
+    : service_(service),
+      hook_(std::move(hook)),
+      engine_(grpc_event_engine::experimental::GetDefaultEventEngine()) {
+  // Get slice from request.
+  Slice slice;
+  grpc::Status status = request_buffer->DumpToSingleSlice(&slice);
+  if (!status.ok()) {
+    LOG_EVERY_N_SEC(WARNING, 1)
+        << "OrcaService failed to extract request from peer: " << peer
+        << " error:" << status.error_message();
+    FinishRpc(Status(StatusCode::INTERNAL, status.error_message()));
+    return;
   }
-
-  void OnWriteDone(bool ok) override {
-    if (!ok) {
-      Finish(Status(StatusCode::UNKNOWN, "write failed"));
-      return;
-    }
-    response_.Clear();
-    ScheduleTimer();
+  // Parse request proto.
+  upb::Arena arena;
+  xds_service_orca_v3_OrcaLoadReportRequest* request =
+      xds_service_orca_v3_OrcaLoadReportRequest_parse(
+          reinterpret_cast<const char*>(slice.begin()), slice.size(),
+          arena.ptr());
+  if (request == nullptr) {
+    LOG_EVERY_N_SEC(WARNING, 1)
+        << "OrcaService failed to parse request proto from peer: " << peer;
+    FinishRpc(Status(StatusCode::INTERNAL, "could not parse request proto"));
+    return;
   }
-
-  void OnCancel() override {
-    MaybeCancelTimer();
-    Finish(Status(StatusCode::UNKNOWN, "call cancelled by client"));
+  const auto* duration_proto =
+      xds_service_orca_v3_OrcaLoadReportRequest_report_interval(request);
+  grpc_core::Duration report_interval;
+  if (duration_proto != nullptr) {
+    report_interval = grpc_core::Duration::FromSecondsAndNanoseconds(
+        google_protobuf_Duration_seconds(duration_proto),
+        google_protobuf_Duration_nanos(duration_proto));
   }
+  auto min_interval = grpc_core::Duration::Milliseconds(
+      service_->min_report_duration_ / absl::Milliseconds(1));
+  report_interval_ = std::max(report_interval, min_interval);
+  // Send initial response.
+  SendResponse();
+}
 
-  void OnDone() override {
-    // Free the initial ref from instantiation.
-    Unref();
+void OrcaService::Reactor::OnWriteDone(bool ok) {
+  if (!ok) {
+    FinishRpc(Status(StatusCode::UNKNOWN, "write failed"));
+    return;
   }
-
- private:
-  void SendResponse() {
-    Slice response_slice = service_->GetOrCreateSerializedResponse();
-    ByteBuffer response_buffer(&response_slice, 1);
-    response_.Swap(&response_buffer);
-    StartWrite(&response_);
+  response_.Clear();
+  if (!MaybeScheduleTimer()) {
+    FinishRpc(Status(StatusCode::UNKNOWN, "call cancelled by client"));
   }
+}
 
-  void ScheduleTimer() {
-    grpc_core::ApplicationCallbackExecCtx callback_exec_ctx;
-    grpc_core::ExecCtx exec_ctx;
-    Ref().release();  // Ref held by timer.
-    grpc::internal::MutexLock lock(&timer_mu_);
-    timer_pending_ = true;
-    grpc_timer_init(&timer_, exec_ctx.Now() + report_interval_, &on_timer_);
+void OrcaService::Reactor::OnCancel() {
+  if (MaybeCancelTimer()) {
+    FinishRpc(Status(StatusCode::UNKNOWN, "call cancelled by client"));
   }
+}
 
-  void MaybeCancelTimer() {
-    grpc_core::ApplicationCallbackExecCtx callback_exec_ctx;
-    grpc_core::ExecCtx exec_ctx;
-    grpc::internal::MutexLock lock(&timer_mu_);
-    if (timer_pending_) {
-      timer_pending_ = false;
-      grpc_timer_cancel(&timer_);
-    }
+void OrcaService::Reactor::OnDone() {
+  // Free the initial ref from instantiation.
+  Unref(DEBUG_LOCATION, "OnDone");
+}
+
+void OrcaService::Reactor::FinishRpc(grpc::Status status) {
+  if (hook_ != nullptr) {
+    hook_->OnFinish(status);
   }
+  Finish(status);
+}
 
-  static void OnTimer(void* arg, grpc_error_handle error) {
-    grpc_core::RefCountedPtr<Reactor> self(static_cast<Reactor*>(arg));
-    grpc::internal::MutexLock lock(&self->timer_mu_);
-    if (error == GRPC_ERROR_NONE && self->timer_pending_) {
-      self->timer_pending_ = false;
-      self->SendResponse();
-    }
+void OrcaService::Reactor::SendResponse() {
+  Slice response_slice = service_->GetOrCreateSerializedResponse();
+  ByteBuffer response_buffer(&response_slice, 1);
+  response_.Swap(&response_buffer);
+  if (hook_ != nullptr) {
+    hook_->OnStartWrite(&response_);
   }
+  StartWrite(&response_);
+}
 
-  OrcaService* service_;
+bool OrcaService::Reactor::MaybeScheduleTimer() {
+  grpc::internal::MutexLock lock(timer_mu_);
+  if (cancelled_) return false;
+  timer_handle_ = engine_->RunAfter(
+      report_interval_,
+      [self = Ref(DEBUG_LOCATION, "Orca Service")] { self->OnTimer(); });
+  return true;
+}
 
-  // TODO(roth): Change this to use the EventEngine API once it becomes
-  // available.
-  grpc::internal::Mutex timer_mu_;
-  bool timer_pending_ ABSL_GUARDED_BY(&timer_mu_) = false;
-  grpc_timer timer_ ABSL_GUARDED_BY(&timer_mu_);
-  grpc_closure on_timer_;
+bool OrcaService::Reactor::MaybeCancelTimer() {
+  grpc::internal::MutexLock lock(timer_mu_);
+  cancelled_ = true;
+  if (timer_handle_.has_value() && engine_->Cancel(*timer_handle_)) {
+    timer_handle_.reset();
+    return true;
+  }
+  return false;
+}
 
-  grpc_core::Duration report_interval_;
-  ByteBuffer response_;
-};
+void OrcaService::Reactor::OnTimer() {
+  grpc_core::ExecCtx exec_ctx;
+  grpc::internal::MutexLock lock(timer_mu_);
+  timer_handle_.reset();
+  SendResponse();
+}
 
 //
 // OrcaService
 //
 
-OrcaService::OrcaService(OrcaService::Options options)
-    : min_report_duration_(options.min_report_duration) {
-  AddMethod(new internal::RpcServiceMethod(
+OrcaService::OrcaService(ServerMetricRecorder* const server_metric_recorder,
+                         Options options)
+    : server_metric_recorder_(server_metric_recorder),
+      min_report_duration_(options.min_report_duration) {
+  GRPC_CHECK_NE(server_metric_recorder_, nullptr);
+  AddMethod(new grpc::internal::RpcServiceMethod(
       "/xds.service.orca.v3.OpenRcaService/StreamCoreMetrics",
-      internal::RpcMethod::SERVER_STREAMING, /*handler=*/nullptr));
+      grpc::internal::RpcMethod::SERVER_STREAMING, /*handler=*/nullptr));
   MarkMethodCallback(
-      0, new internal::CallbackServerStreamingHandler<ByteBuffer, ByteBuffer>(
-             [this](CallbackServerContext* /*ctx*/, const ByteBuffer* request) {
-               return new Reactor(this, request);
+      0, new grpc::internal::CallbackServerStreamingHandler<ByteBuffer,
+                                                            ByteBuffer>(
+             [this](CallbackServerContext* ctx, const ByteBuffer* request) {
+               return new Reactor(this, ctx->peer(), request, nullptr);
              }));
 }
 
-void OrcaService::SetCpuUtilization(double cpu_utilization) {
-  grpc::internal::MutexLock lock(&mu_);
-  cpu_utilization_ = cpu_utilization;
-  response_slice_.reset();
-}
-
-void OrcaService::DeleteCpuUtilization() {
-  grpc::internal::MutexLock lock(&mu_);
-  cpu_utilization_ = -1;
-  response_slice_.reset();
-}
-
-void OrcaService::SetMemoryUtilization(double memory_utilization) {
-  grpc::internal::MutexLock lock(&mu_);
-  memory_utilization_ = memory_utilization;
-  response_slice_.reset();
-}
-
-void OrcaService::DeleteMemoryUtilization() {
-  grpc::internal::MutexLock lock(&mu_);
-  memory_utilization_ = -1;
-  response_slice_.reset();
-}
-
-void OrcaService::SetNamedUtilization(std::string name, double utilization) {
-  grpc::internal::MutexLock lock(&mu_);
-  named_utilization_[std::move(name)] = utilization;
-  response_slice_.reset();
-}
-
-void OrcaService::DeleteNamedUtilization(const std::string& name) {
-  grpc::internal::MutexLock lock(&mu_);
-  named_utilization_.erase(name);
-  response_slice_.reset();
-}
-
-void OrcaService::SetAllNamedUtilization(
-    std::map<std::string, double> named_utilization) {
-  grpc::internal::MutexLock lock(&mu_);
-  named_utilization_ = std::move(named_utilization);
-  response_slice_.reset();
-}
-
 Slice OrcaService::GetOrCreateSerializedResponse() {
-  grpc::internal::MutexLock lock(&mu_);
-  if (!response_slice_.has_value()) {
+  grpc::internal::MutexLock lock(mu_);
+  std::shared_ptr<const ServerMetricRecorder::BackendMetricDataState> result =
+      server_metric_recorder_->GetMetricsIfChanged();
+  if (!response_slice_seq_.has_value() ||
+      *response_slice_seq_ != result->sequence_number) {
+    const auto& data = result->data;
     upb::Arena arena;
     xds_data_orca_v3_OrcaLoadReport* response =
         xds_data_orca_v3_OrcaLoadReport_new(arena.ptr());
-    if (cpu_utilization_ != -1) {
+    if (data.cpu_utilization != -1) {
       xds_data_orca_v3_OrcaLoadReport_set_cpu_utilization(response,
-                                                          cpu_utilization_);
+                                                          data.cpu_utilization);
     }
-    if (memory_utilization_ != -1) {
+    if (data.mem_utilization != -1) {
       xds_data_orca_v3_OrcaLoadReport_set_mem_utilization(response,
-                                                          memory_utilization_);
+                                                          data.mem_utilization);
     }
-    for (const auto& p : named_utilization_) {
+    if (data.application_utilization != -1) {
+      xds_data_orca_v3_OrcaLoadReport_set_application_utilization(
+          response, data.application_utilization);
+    }
+    if (data.qps != -1) {
+      xds_data_orca_v3_OrcaLoadReport_set_rps_fractional(response, data.qps);
+    }
+    if (data.eps != -1) {
+      xds_data_orca_v3_OrcaLoadReport_set_eps(response, data.eps);
+    }
+    for (const auto& u : data.utilization) {
       xds_data_orca_v3_OrcaLoadReport_utilization_set(
           response,
-          upb_StringView_FromDataAndSize(p.first.data(), p.first.size()),
-          p.second, arena.ptr());
+          upb_StringView_FromDataAndSize(u.first.data(), u.first.size()),
+          u.second, arena.ptr());
     }
     size_t buf_length;
     char* buf = xds_data_orca_v3_OrcaLoadReport_serialize(response, arena.ptr(),
                                                           &buf_length);
     response_slice_.emplace(buf, buf_length);
+    response_slice_seq_ = result->sequence_number;
   }
   return Slice(*response_slice_);
 }

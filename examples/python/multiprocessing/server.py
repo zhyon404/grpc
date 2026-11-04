@@ -13,16 +13,13 @@
 # limitations under the License.
 """An example of multiprocess concurrency with gRPC."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 from concurrent import futures
 import contextlib
 import datetime
 import logging
 import math
 import multiprocessing
+import platform
 import socket
 import sys
 import time
@@ -47,9 +44,8 @@ def is_prime(n):
 
 
 class PrimeChecker(prime_pb2_grpc.PrimeCheckerServicer):
-
     def check(self, request, context):
-        _LOGGER.info('Determining primality of %s', request.candidate)
+        _LOGGER.info("Determining primality of %s", request.candidate)
         return prime_pb2.Primality(isPrime=is_prime(request.candidate))
 
 
@@ -63,12 +59,15 @@ def _wait_forever(server):
 
 def _run_server(bind_address):
     """Start a server in a subprocess."""
-    _LOGGER.info('Starting new server.')
-    options = (('grpc.so_reuseport', 1),)
+    _LOGGER.info("Starting new server.")
+    options = (("grpc.so_reuseport", 1),)
 
-    server = grpc.server(futures.ThreadPoolExecutor(
-        max_workers=_THREAD_CONCURRENCY,),
-                         options=options)
+    server = grpc.server(
+        futures.ThreadPoolExecutor(
+            max_workers=_THREAD_CONCURRENCY,
+        ),
+        options=options,
+    )
     prime_pb2_grpc.add_PrimeCheckerServicer_to_server(PrimeChecker(), server)
     server.add_insecure_port(bind_address)
     server.start()
@@ -82,7 +81,7 @@ def _reserve_port():
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     if sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT) == 0:
         raise RuntimeError("Failed to set SO_REUSEPORT.")
-    sock.bind(('', 0))
+    sock.bind(("", 0))
     try:
         yield sock.getsockname()[1]
     finally:
@@ -90,26 +89,44 @@ def _reserve_port():
 
 
 def main():
+    # Check if we're on macOS and warn about SO_REUSEPORT limitations
+    if platform.system() == "Darwin":
+        warning_message = """
+            ⚠️  WARNING: Running on MacOS (Darwin), SO_REUSEPORT behavior on MacOS is different from
+            Linux. On MacOS, SO_REUSEPORT does not provide true load balancing - all requests from
+            the same connection will be handled by the same process, defeating the purpose of
+            multiprocessing. This is the issue described in GitHub #40444. For true multiprocessing
+            on MacOS, consider using multiple worker processes on different ports.
+        """
+        print(warning_message)
     with _reserve_port() as port:
-        bind_address = 'localhost:{}'.format(port)
+        bind_address = "localhost:{}".format(port)
         _LOGGER.info("Binding to '%s'", bind_address)
         sys.stdout.flush()
         workers = []
         for _ in range(_PROCESS_COUNT):
-            # NOTE: It is imperative that the worker subprocesses be forked before
-            # any gRPC servers start up. See
+            # NOTE: It is imperative that the parent process fork child processes
+            # BEFORE the parent process starts a gRPC server. See
             # https://github.com/grpc/grpc/issues/16001 for more details.
-            worker = multiprocessing.Process(target=_run_server,
-                                             args=(bind_address,))
+            #
+            # In this example, the parent process never starts a gRPC server
+            # for its own use - it only forks worker processes.
+            # Each forked child then independently starts its own server.
+            # Since forked processes have independent address spaces, it doesn't matter
+            # if some children start their servers while others are still being forked.
+            # The crucial point is that THIS (parent) process hasn't started a gRPC server.
+            worker = multiprocessing.Process(
+                target=_run_server, args=(bind_address,)
+            )
             worker.start()
             workers.append(worker)
         for worker in workers:
             worker.join()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     handler = logging.StreamHandler(sys.stdout)
-    formatter = logging.Formatter('[PID %(process)d] %(message)s')
+    formatter = logging.Formatter("[PID %(process)d] %(message)s")
     handler.setFormatter(formatter)
     _LOGGER.addHandler(handler)
     _LOGGER.setLevel(logging.INFO)

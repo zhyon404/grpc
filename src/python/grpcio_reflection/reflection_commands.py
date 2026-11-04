@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Provides distutils command classes for the GRPC Python setup process."""
+"""Provides setuptools command classes for the GRPC Python setup process."""
 
 import os
 import shutil
@@ -19,16 +19,19 @@ import shutil
 import setuptools
 
 ROOT_DIR = os.path.abspath(os.path.dirname(os.path.abspath(__file__)))
-REFLECTION_PROTO = os.path.join(
-    ROOT_DIR, '../../proto/grpc/reflection/v1alpha/reflection.proto')
-LICENSE = os.path.join(ROOT_DIR, '../../../LICENSE')
+GRPC_ROOT_ABS_PATH = os.path.join(ROOT_DIR, "../../..")
+ROOT_REL_DIR = os.path.relpath(ROOT_DIR, start=GRPC_ROOT_ABS_PATH)
+REFLECTION_PROTO = (
+    "third_party/grpc-proto/grpc/reflection/v1alpha/reflection.proto"
+)
+LICENSE = "./LICENSE"
 
 
 class Preprocess(setuptools.Command):
     """Command to copy proto modules from grpc/src/proto and LICENSE from
     the root directory"""
 
-    description = ''
+    description = ""
     user_options = []
 
     def initialize_options(self):
@@ -38,19 +41,22 @@ class Preprocess(setuptools.Command):
         pass
 
     def run(self):
+        # TODO: Can skip copy proto part.
         if os.path.isfile(REFLECTION_PROTO):
             shutil.copyfile(
                 REFLECTION_PROTO,
-                os.path.join(ROOT_DIR,
-                             'grpc_reflection/v1alpha/reflection.proto'))
+                os.path.join(
+                    ROOT_REL_DIR, "grpc_reflection/v1alpha/reflection.proto"
+                ),
+            )
         if os.path.isfile(LICENSE):
-            shutil.copyfile(LICENSE, os.path.join(ROOT_DIR, 'LICENSE'))
+            shutil.copyfile(LICENSE, os.path.join(ROOT_REL_DIR, "LICENSE"))
 
 
 class BuildPackageProtos(setuptools.Command):
     """Command to generate project *_pb2.py modules from proto files."""
 
-    description = 'build grpc protobuf modules'
+    description = "build grpc protobuf modules"
     user_options = []
 
     def initialize_options(self):
@@ -60,9 +66,7 @@ class BuildPackageProtos(setuptools.Command):
         pass
 
     def run(self):
-        # due to limitations of the proto generator, we require that only *one*
-        # directory is provided as an 'include' directory. We assume it's the '' key
-        # to `self.distribution.package_dir` (and get a key error if it's not
-        # there).
         from grpc_tools import command
-        command.build_package_protos(self.distribution.package_dir[''])
+
+        # find and build all protos in the current package
+        command.build_package_protos(ROOT_REL_DIR, strict_mode=True)

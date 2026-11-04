@@ -22,7 +22,6 @@ _CLIENT_INACTIVE = object()
 
 
 class Handler(_common.ServerRpcHandler):
-
     @abc.abstractmethod
     def initial_metadata(self):
         raise NotImplementedError()
@@ -53,7 +52,6 @@ class Handler(_common.ServerRpcHandler):
 
 
 class _Handler(Handler):
-
     def __init__(self, requests_closed):
         self._condition = threading.Condition()
         self._requests = []
@@ -80,10 +78,9 @@ class _Handler(Handler):
                         request = self._requests.pop(0)
                         self._condition.notify_all()
                         return _common.ServerRpcRead(request, False, False)
-                    elif self._requests_closed:
+                    if self._requests_closed:
                         return _common.REQUESTS_CLOSED
-                    else:
-                        self._condition.wait()
+                    self._condition.wait()
                 else:
                     return _common.TERMINATED
 
@@ -110,8 +107,7 @@ class _Handler(Handler):
             if self._code is None:
                 self._termination_callbacks.append(callback)
                 return True
-            else:
-                return False
+            return False
 
     def initial_metadata(self):
         with self._condition:
@@ -120,8 +116,8 @@ class _Handler(Handler):
                     if self._code is None:
                         self._condition.wait()
                     else:
-                        raise ValueError(
-                            'No initial metadata despite status code!')
+                        error_msg = "No initial metadata despite status code!"
+                        raise ValueError(error_msg)
                 else:
                     return self._initial_metadata
 
@@ -137,10 +133,11 @@ class _Handler(Handler):
                     response = self._responses.pop(0)
                     self._condition.notify_all()
                     return response
-                elif self._code is None:
+                if self._code is None:
                     self._condition.wait()
                 else:
-                    raise ValueError('No more responses!')
+                    error_msg = "No more responses!"
+                    raise ValueError(error_msg)
 
     def requests_closed(self):
         with self._condition:
@@ -148,6 +145,7 @@ class _Handler(Handler):
             self._condition.notify_all()
 
     def cancel(self):
+        termination_callbacks = []
         with self._condition:
             if self._code is None:
                 self._code = _CLIENT_INACTIVE
@@ -163,13 +161,13 @@ class _Handler(Handler):
         with self._condition:
             while True:
                 if self._code is _CLIENT_INACTIVE:
-                    raise ValueError('Huh? Cancelled but wanting status?')
-                elif self._code is None:
+                    error_msg = "Huh? Cancelled but wanting status?"
+                    raise ValueError(error_msg)
+                if self._code is None:
                     self._condition.wait()
                 else:
-                    if self._unary_response is None:
-                        if self._responses:
-                            self._unary_response = self._responses.pop(0)
+                    if self._unary_response is None and self._responses:
+                        self._unary_response = self._responses.pop(0)
                     return (
                         self._unary_response,
                         self._trailing_metadata,
@@ -181,8 +179,9 @@ class _Handler(Handler):
         with self._condition:
             while True:
                 if self._code is _CLIENT_INACTIVE:
-                    raise ValueError('Huh? Cancelled but wanting status?')
-                elif self._code is None:
+                    error_msg = "Huh? Cancelled but wanting status?"
+                    raise ValueError(error_msg)
+                if self._code is None:
                     self._condition.wait()
                 else:
                     return self._trailing_metadata, self._code, self._details
@@ -194,7 +193,7 @@ class _Handler(Handler):
                     self._initial_metadata = _common.FUSSED_EMPTY_METADATA
                 self._trailing_metadata = _common.FUSSED_EMPTY_METADATA
                 self._code = grpc.StatusCode.DEADLINE_EXCEEDED
-                self._details = 'Took too much time!'
+                self._details = "Took too much time!"
                 termination_callbacks = self._termination_callbacks
                 self._termination_callbacks = None
                 self._condition.notify_all()

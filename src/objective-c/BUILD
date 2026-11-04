@@ -14,14 +14,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("//bazel:grpc_build_system.bzl", "grpc_generate_objc_one_off_targets", "grpc_objc_library")
 load("@build_bazel_rules_apple//apple:resources.bzl", "apple_resource_bundle")
+load("//bazel:grpc_build_system.bzl", "grpc_generate_objc_one_off_targets", "grpc_objc_library")
 
 licenses(["notice"])
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
+    features = [
+        "layering_check",
+        "parse_headers",
+    ],
 )
 
 exports_files(["LICENSE"])
@@ -64,7 +67,6 @@ grpc_objc_library(
     hdrs = [
         "GRPCClient/GRPCCall+ChannelArg.h",
         "GRPCClient/GRPCCall+ChannelCredentials.h",
-        "GRPCClient/GRPCCall+Cronet.h",
         "GRPCClient/GRPCCall+OAuth2.h",
         "GRPCClient/GRPCCall+Tests.h",
         "GRPCClient/GRPCCallLegacy.h",
@@ -78,7 +80,7 @@ grpc_objc_library(
 grpc_objc_library(
     name = "grpc_objc_interface_types",
     srcs = [
-        "GRPCClient/GRPCTypes.m",
+        "GRPCClient/GRPCTypes.mm",
     ],
     hdrs = [
         "GRPCClient/GRPCTypes.h",
@@ -88,12 +90,12 @@ grpc_objc_library(
 grpc_objc_library(
     name = "grpc_objc_interface",
     srcs = [
-        "GRPCClient/GRPCCall.m",
-        "GRPCClient/GRPCCall+Interceptor.m",
-        "GRPCClient/GRPCCallOptions.m",
-        "GRPCClient/GRPCInterceptor.m",
-        "GRPCClient/GRPCTransport.m",
-        "GRPCClient/private/GRPCTransport+Private.m",
+        "GRPCClient/GRPCCall.mm",
+        "GRPCClient/GRPCCall+Interceptor.mm",
+        "GRPCClient/GRPCCallOptions.mm",
+        "GRPCClient/GRPCInterceptor.mm",
+        "GRPCClient/GRPCTransport.mm",
+        "GRPCClient/private/GRPCTransport+Private.mm",
     ],
     hdrs = [
         "GRPCClient/GRPCCall.h",
@@ -111,33 +113,46 @@ grpc_objc_library(
     ],
     deps = [
         ":grpc_objc_interface_legacy",
+        ":grpc_objc_interface_types",
     ],
+)
+
+# The private headers of grpc_objc_client. They're in a separate target so that
+# grpc_objc_client doesn't export them to its dependents as textual headers.
+grpc_objc_library(
+    name = "grpc_objc_client_private",
+    textual_hdrs = glob(["GRPCClient/private/GRPCCore/*.h"]),
+    visibility = ["//visibility:private"],
 )
 
 grpc_objc_library(
     name = "grpc_objc_client",
     srcs = [
-        "GRPCClient/GRPCCall+ChannelArg.m",
-        "GRPCClient/GRPCCall+ChannelCredentials.m",
-        "GRPCClient/GRPCCall+Cronet.m",
-        "GRPCClient/GRPCCall+OAuth2.m",
-        "GRPCClient/GRPCCall+Tests.m",
-        "GRPCClient/GRPCCallLegacy.m",
-    ] + glob(["GRPCClient/private/GRPCCore/*.m"]),
+        "GRPCClient/GRPCCall+ChannelArg.mm",
+        "GRPCClient/GRPCCall+ChannelCredentials.mm",
+        "GRPCClient/GRPCCall+OAuth2.mm",
+        "GRPCClient/GRPCCall+Tests.mm",
+        "GRPCClient/GRPCCallLegacy.mm",
+    ] + glob(["GRPCClient/private/GRPCCore/*.mm"]),
     hdrs = [
         "GRPCClient/GRPCCall+ChannelArg.h",
         "GRPCClient/GRPCCall+ChannelCredentials.h",
-        "GRPCClient/GRPCCall+Cronet.h",
         "GRPCClient/GRPCCall+OAuth2.h",
         "GRPCClient/GRPCCall+Tests.h",
     ],
     data = [":gRPCCertificates"],
     includes = ["."],
-    textual_hdrs = glob(["GRPCClient/private/GRPCCore/*.h"]),
     deps = [
+        ":grpc_objc_client_private",
         ":grpc_objc_interface",
         ":grpc_objc_interface_legacy",
+        ":grpc_objc_interface_types",
         ":rx_library",
+        ":rx_library_headers",
+        "//:gpr",
+        "//:grpc",
+        "//:grpc++_public_hdrs",
+        "//:grpc_core_credentials_header",
         "//:grpc_objc",
     ],
 )
@@ -174,6 +189,7 @@ grpc_objc_library(
     deps = [
         ":grpc_objc_interface",
         ":proto_objc_rpc_legacy_header",
+        ":rx_library_headers",
         "@com_google_protobuf//:protobuf_objc",
     ],
 )
@@ -192,9 +208,12 @@ grpc_objc_library(
     ],
     deps = [
         ":grpc_objc_client_core",
+        ":grpc_objc_interface",
+        ":grpc_objc_interface_legacy",
         ":proto_objc_rpc_legacy_header",
         ":proto_objc_rpc_v2",
         ":rx_library",
+        ":rx_library_headers",
         "@com_google_protobuf//:protobuf_objc",
     ],
 )
@@ -209,18 +228,16 @@ apple_resource_bundle(
 grpc_objc_library(
     name = "grpc_objc_client_core_internal_testing",
     srcs = [
-        "GRPCClient/GRPCCall+ChannelArg.m",
-        "GRPCClient/GRPCCall+ChannelCredentials.m",
-        "GRPCClient/GRPCCall+Cronet.m",
-        "GRPCClient/GRPCCall+OAuth2.m",
-        "GRPCClient/GRPCCall+Tests.m",
-        "GRPCClient/GRPCCallLegacy.m",
-        "GRPCClient/internal_testing/GRPCCall+InternalTests.m",
-    ] + glob(["GRPCClient/private/GRPCCore/*.m"]),
+        "GRPCClient/GRPCCall+ChannelArg.mm",
+        "GRPCClient/GRPCCall+ChannelCredentials.mm",
+        "GRPCClient/GRPCCall+OAuth2.mm",
+        "GRPCClient/GRPCCall+Tests.mm",
+        "GRPCClient/GRPCCallLegacy.mm",
+        "GRPCClient/internal_testing/GRPCCall+InternalTests.mm",
+    ] + glob(["GRPCClient/private/GRPCCore/*.mm"]),
     hdrs = [
         "GRPCClient/GRPCCall+ChannelArg.h",
         "GRPCClient/GRPCCall+ChannelCredentials.h",
-        "GRPCClient/GRPCCall+Cronet.h",
         "GRPCClient/GRPCCall+OAuth2.h",
         "GRPCClient/GRPCCall+Tests.h",
         "GRPCClient/internal_testing/GRPCCall+InternalTests.h",
@@ -234,7 +251,11 @@ grpc_objc_library(
     deps = [
         ":grpc_objc_interface",
         ":grpc_objc_interface_legacy",
+        ":grpc_objc_interface_types",
         ":rx_library",
+        ":rx_library_headers",
+        "//:gpr",
+        "//:grpc_core_credentials_header",
         "//:grpc_objc",
     ],
 )
@@ -253,9 +274,14 @@ grpc_objc_library(
     ],
     deps = [
         ":grpc_objc_client_core_internal_testing",
+        ":grpc_objc_interface",
+        ":grpc_objc_interface_legacy",
+        ":grpc_objc_interface_types",
         ":proto_objc_rpc_legacy_header",
         ":proto_objc_rpc_v2",
         ":rx_library",
+        ":rx_library_headers",
+        "//:gpr",
         "@com_google_protobuf//:protobuf_objc",
     ],
 )

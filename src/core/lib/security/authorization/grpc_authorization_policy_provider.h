@@ -12,19 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef GRPC_CORE_LIB_SECURITY_AUTHORIZATION_GRPC_AUTHORIZATION_POLICY_PROVIDER_H
-#define GRPC_CORE_LIB_SECURITY_AUTHORIZATION_GRPC_AUTHORIZATION_POLICY_PROVIDER_H
+#ifndef GRPC_SRC_CORE_LIB_SECURITY_AUTHORIZATION_GRPC_AUTHORIZATION_POLICY_PROVIDER_H
+#define GRPC_SRC_CORE_LIB_SECURITY_AUTHORIZATION_GRPC_AUTHORIZATION_POLICY_PROVIDER_H
 
+#include <grpc/grpc_security.h>
 #include <grpc/support/port_platform.h>
+#include <grpc/support/sync.h>
 
+#include <functional>
 #include <memory>
+#include <string>
 
-#include "absl/status/statusor.h"
-
-#include "src/core/lib/gprpp/sync.h"
-#include "src/core/lib/gprpp/thd.h"
+#include "src/core/lib/security/authorization/authorization_engine.h"
 #include "src/core/lib/security/authorization/authorization_policy_provider.h"
 #include "src/core/lib/security/authorization/rbac_translator.h"
+#include "src/core/util/ref_counted_ptr.h"
+#include "src/core/util/sync.h"
+#include "src/core/util/thd.h"
+#include "absl/base/thread_annotations.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
 
 namespace grpc_core {
 
@@ -46,7 +54,7 @@ class StaticDataAuthorizationPolicyProvider
     return {allow_engine_, deny_engine_};
   }
 
-  void Orphan() override {}
+  void Orphaned() override {}
 
  private:
   RefCountedPtr<AuthorizationEngine> allow_engine_;
@@ -74,10 +82,13 @@ class FileWatcherAuthorizationPolicyProvider
                                          unsigned int refresh_interval_sec,
                                          absl::Status* status);
 
-  void Orphan() override;
+  void SetCallbackForTesting(
+      std::function<void(bool contents_changed, absl::Status Status)> cb);
+
+  void Orphaned() override;
 
   AuthorizationEngines engines() override {
-    MutexLock lock(&mu_);
+    MutexLock lock(mu_);
     return {allow_engine_, deny_engine_};
   }
 
@@ -93,6 +104,9 @@ class FileWatcherAuthorizationPolicyProvider
   gpr_event shutdown_event_;
 
   Mutex mu_;
+  // Callback is executed on every reload. This is useful for testing purpose.
+  std::function<void(bool contents_changed, absl::Status status)> cb_
+      ABSL_GUARDED_BY(mu_) = nullptr;
   // Engines created using authz_policy_.
   RefCountedPtr<AuthorizationEngine> allow_engine_ ABSL_GUARDED_BY(mu_);
   RefCountedPtr<AuthorizationEngine> deny_engine_ ABSL_GUARDED_BY(mu_);
@@ -100,4 +114,4 @@ class FileWatcherAuthorizationPolicyProvider
 
 }  // namespace grpc_core
 
-#endif  // GRPC_CORE_LIB_SECURITY_AUTHORIZATION_GRPC_AUTHORIZATION_POLICY_PROVIDER_H
+#endif  // GRPC_SRC_CORE_LIB_SECURITY_AUTHORIZATION_GRPC_AUTHORIZATION_POLICY_PROVIDER_H

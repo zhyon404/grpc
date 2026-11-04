@@ -30,8 +30,27 @@ class CSharpGrpcGenerator : public grpc::protobuf::compiler::CodeGenerator {
   ~CSharpGrpcGenerator() {}
 
   uint64_t GetSupportedFeatures() const override {
-    return FEATURE_PROTO3_OPTIONAL;
+    return FEATURE_PROTO3_OPTIONAL
+#ifdef GRPC_PROTOBUF_EDITION_SUPPORT
+           | FEATURE_SUPPORTS_EDITIONS
+#endif
+        ;
   }
+
+#ifdef GRPC_PROTOBUF_EDITION_SUPPORT
+  grpc::protobuf::Edition GetMinimumEdition() const override {
+    return grpc::protobuf::Edition::EDITION_PROTO2;
+  }
+  grpc::protobuf::Edition GetMaximumEdition() const override {
+    // TODO(yuanweiz): Remove when the protobuf is updated to a version
+    //      that supports edition 2024.
+#if !defined(GOOGLE_PROTOBUF_VERSION) || GOOGLE_PROTOBUF_VERSION >= 6032000
+    return grpc::protobuf::Edition::EDITION_2024;
+#else
+    return grpc::protobuf::Edition::EDITION_2023;
+#endif
+  }
+#endif
 
   bool Generate(const grpc::protobuf::FileDescriptor* file,
                 const std::string& parameter,
@@ -43,6 +62,10 @@ class CSharpGrpcGenerator : public grpc::protobuf::compiler::CodeGenerator {
     bool generate_client = true;
     bool generate_server = true;
     bool internal_access = false;
+    bool append_async_suffix = false;
+    std::string base_namespace = "";
+    bool base_namespace_present = false;
+
     // the suffix that will get appended to the name generated from the name
     // of the original .proto file
     std::string file_suffix = "Grpc.cs";
@@ -55,6 +78,14 @@ class CSharpGrpcGenerator : public grpc::protobuf::compiler::CodeGenerator {
         internal_access = true;
       } else if (options[i].first == "file_suffix") {
         file_suffix = options[i].second;
+      } else if (options[i].first == "base_namespace") {
+        // Support for base_namespace option in this plugin is experimental.
+        // The option may be removed or file names generated may change
+        // in the future.
+        base_namespace = options[i].second;
+        base_namespace_present = true;
+      } else if (options[i].first == "append_async_suffix") {
+        append_async_suffix = (options[i].second == "true");
       } else {
         *error = "Unknown generator option: " + options[i].first;
         return false;
@@ -62,15 +93,17 @@ class CSharpGrpcGenerator : public grpc::protobuf::compiler::CodeGenerator {
     }
 
     std::string code = grpc_csharp_generator::GetServices(
-        file, generate_client, generate_server, internal_access);
+        file, generate_client, generate_server, internal_access,
+        append_async_suffix);
     if (code.size() == 0) {
       return true;  // don't generate a file if there are no services
     }
 
     // Get output file name.
     std::string file_name;
-    if (!grpc_csharp_generator::ServicesFilename(file, file_suffix,
-                                                 file_name)) {
+    if (!grpc_csharp_generator::ServicesFilename(
+            file, file_suffix, base_namespace_present, base_namespace,
+            file_name, error)) {
       return false;
     }
     std::unique_ptr<grpc::protobuf::io::ZeroCopyOutputStream> output(

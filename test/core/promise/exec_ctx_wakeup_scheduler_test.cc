@@ -14,9 +14,14 @@
 
 #include "src/core/lib/promise/exec_ctx_wakeup_scheduler.h"
 
-#include <gtest/gtest.h>
+#include <stdlib.h>
+
+#include <memory>
 
 #include "src/core/lib/promise/activity.h"
+#include "src/core/lib/promise/poll.h"
+#include "gtest/gtest.h"
+#include "absl/status/status.h"
 
 namespace grpc_core {
 

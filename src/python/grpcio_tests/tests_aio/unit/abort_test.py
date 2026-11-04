@@ -24,25 +24,30 @@ from grpc.experimental import aio
 from tests.unit.framework.common import test_constants
 from tests_aio.unit._test_base import AioTestBase
 
-_UNARY_UNARY_ABORT = '/test/UnaryUnaryAbort'
-_SUPPRESS_ABORT = '/test/SuppressAbort'
-_REPLACE_ABORT = '/test/ReplaceAbort'
-_ABORT_AFTER_REPLY = '/test/AbortAfterReply'
+_UNARY_UNARY_ABORT = "/test/UnaryUnaryAbort"
+_SYNC_UNARY_UNARY_ABORT = "/test/SyncUnaryUnaryAbort"
+_SUPPRESS_ABORT = "/test/SuppressAbort"
+_REPLACE_ABORT = "/test/ReplaceAbort"
+_ABORT_AFTER_REPLY = "/test/AbortAfterReply"
 
-_REQUEST = b'\x00\x00\x00'
-_RESPONSE = b'\x01\x01\x01'
+_REQUEST = b"\x00\x00\x00"
+_RESPONSE = b"\x01\x01\x01"
 _NUM_STREAM_RESPONSES = 5
 
 _ABORT_CODE = grpc.StatusCode.RESOURCE_EXHAUSTED
-_ABORT_DETAILS = 'Phony error details'
+_ABORT_DETAILS = "Phony error details"
 
 
 class _GenericHandler(grpc.GenericRpcHandler):
-
     @staticmethod
     async def _unary_unary_abort(unused_request, context):
         await context.abort(_ABORT_CODE, _ABORT_DETAILS)
-        raise RuntimeError('This line should not be executed')
+        raise RuntimeError("This line should not be executed")
+
+    @staticmethod
+    def _sync_unary_unary_abort(unused_request, context):
+        context.abort(_ABORT_CODE, _ABORT_DETAILS)
+        raise RuntimeError("This line should not be executed")
 
     @staticmethod
     async def _suppress_abort(unused_request, context):
@@ -57,18 +62,23 @@ class _GenericHandler(grpc.GenericRpcHandler):
         try:
             await context.abort(_ABORT_CODE, _ABORT_DETAILS)
         except aio.AbortError as e:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT,
-                                'Override abort!')
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "Override abort!"
+            )
 
     @staticmethod
     async def _abort_after_reply(unused_request, context):
         yield _RESPONSE
         await context.abort(_ABORT_CODE, _ABORT_DETAILS)
-        raise RuntimeError('This line should not be executed')
+        raise RuntimeError("This line should not be executed")
 
     def service(self, handler_details):
         if handler_details.method == _UNARY_UNARY_ABORT:
             return grpc.unary_unary_rpc_method_handler(self._unary_unary_abort)
+        if handler_details.method == _SYNC_UNARY_UNARY_ABORT:
+            return grpc.unary_unary_rpc_method_handler(
+                self._sync_unary_unary_abort
+            )
         if handler_details.method == _SUPPRESS_ABORT:
             return grpc.unary_unary_rpc_method_handler(self._suppress_abort)
         if handler_details.method == _REPLACE_ABORT:
@@ -79,14 +89,13 @@ class _GenericHandler(grpc.GenericRpcHandler):
 
 async def _start_test_server():
     server = aio.server()
-    port = server.add_insecure_port('[::]:0')
+    port = server.add_insecure_port("[::]:0")
     server.add_generic_rpc_handlers((_GenericHandler(),))
     await server.start()
-    return 'localhost:%d' % port, server
+    return "localhost:%d" % port, server
 
 
 class TestAbort(AioTestBase):
-
     async def setUp(self):
         address, self._server = await _start_test_server()
         self._channel = aio.insecure_channel(address)
@@ -97,6 +106,20 @@ class TestAbort(AioTestBase):
 
     async def test_unary_unary_abort(self):
         method = self._channel.unary_unary(_UNARY_UNARY_ABORT)
+        call = method(_REQUEST)
+
+        self.assertEqual(_ABORT_CODE, await call.code())
+        self.assertEqual(_ABORT_DETAILS, await call.details())
+
+        with self.assertRaises(aio.AioRpcError) as exception_context:
+            await call
+
+        rpc_error = exception_context.exception
+        self.assertEqual(_ABORT_CODE, rpc_error.code())
+        self.assertEqual(_ABORT_DETAILS, rpc_error.details())
+
+    async def test_sync_unary_unary_abort(self):
+        method = self._channel.unary_unary(_SYNC_UNARY_UNARY_ABORT)
         call = method(_REQUEST)
 
         self.assertEqual(_ABORT_CODE, await call.code())
@@ -147,6 +170,6 @@ class TestAbort(AioTestBase):
         self.assertEqual(_ABORT_DETAILS, await call.details())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     unittest.main(verbosity=2)

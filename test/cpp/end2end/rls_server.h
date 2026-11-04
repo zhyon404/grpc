@@ -14,11 +14,15 @@
 // limitations under the License.
 //
 
-#include "absl/types/optional.h"
+#ifndef GRPC_TEST_CPP_END2END_RLS_SERVER_H
+#define GRPC_TEST_CPP_END2END_RLS_SERVER_H
 
-#include "src/core/lib/gprpp/time.h"
-#include "src/proto/grpc/lookup/v1/rls.grpc.pb.h"
-#include "src/proto/grpc/lookup/v1/rls.pb.h"
+#include <grpc/lookup/v1/rls.grpc.pb.h>
+#include <grpc/lookup/v1/rls.pb.h>
+
+#include <optional>
+
+#include "src/core/util/time.h"
 #include "test/cpp/end2end/counted_service.h"
 
 namespace grpc {
@@ -92,3 +96,5 @@ grpc::lookup::v1::RouteLookupResponse BuildRlsResponse(
 
 }  // namespace testing
 }  // namespace grpc
+
+#endif  // GRPC_TEST_CPP_END2END_RLS_SERVER_H

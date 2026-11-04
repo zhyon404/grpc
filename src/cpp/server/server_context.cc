@@ -1,44 +1,209 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
-#include <algorithm>
-#include <atomic>
-#include <utility>
-
+#include <assert.h>
 #include <grpc/compression.h>
 #include <grpc/grpc.h>
+#include <grpc/impl/compression_types.h>
 #include <grpc/load_reporting.h>
+#include <grpc/status.h>
 #include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
+#include <grpc/support/time.h>
+#include <grpcpp/completion_queue.h>
+#include <grpcpp/ext/call_metric_recorder.h>
+#include <grpcpp/ext/server_metric_recorder.h>
 #include <grpcpp/impl/call.h>
-#include <grpcpp/impl/codegen/completion_queue.h>
-#include <grpcpp/impl/codegen/server_context.h>
-#include <grpcpp/impl/grpc_library.h>
+#include <grpcpp/impl/call_op_set.h>
+#include <grpcpp/impl/call_op_set_interface.h>
+#include <grpcpp/impl/completion_queue_tag.h>
+#include <grpcpp/impl/interceptor_common.h>
+#include <grpcpp/impl/metadata_map.h>
+#include <grpcpp/server_context.h>
+#include <grpcpp/support/callback_common.h>
+#include <grpcpp/support/interceptor.h>
 #include <grpcpp/support/server_callback.h>
-#include <grpcpp/support/time.h>
+#include <grpcpp/support/server_interceptor.h>
+#include <grpcpp/support/string_ref.h>
 
-#include "src/core/lib/gprpp/ref_counted.h"
-#include "src/core/lib/gprpp/sync.h"
+#include <atomic>
+#include <cstdint>
+#include <cstdlib>
+#include <functional>
+#include <limits>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/surface/call.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/grpc_check.h"
+#include "src/core/util/no_destruct.h"
+#include "src/core/util/ref_counted.h"
+#include "src/core/util/sync.h"
+#include "src/cpp/server/backend_metric_recorder.h"
+#include "absl/log/log.h"
+#include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
 
 namespace grpc {
+namespace internal {
 
-static internal::GrpcLibraryInitializer g_gli_initializer;
+class SessionContextRegistry {
+ public:
+  static uint16_t Register(void (*destroy)(void*)) {
+    auto* state = GetState();
+    grpc_core::MutexLock lock(state->mu);
+    uint16_t id = state->destroy_functions.size();
+    GRPC_CHECK_LT(id, std::numeric_limits<uint16_t>::max());
+    state->destroy_functions.push_back(destroy);
+    return id;
+  }
+
+  static void DestroyElement(uint16_t id, void* element) {
+    if (element == nullptr) return;
+    auto* state = GetState();
+    void (*destroy)(void*) = nullptr;
+    {
+      grpc_core::MutexLock lock(state->mu);
+      if (id < state->destroy_functions.size()) {
+        destroy = state->destroy_functions[id];
+      }
+    }
+    if (destroy != nullptr) {
+      destroy(element);
+    }
+  }
+
+ private:
+  struct RegistryState {
+    grpc_core::Mutex mu;
+    std::vector<void (*)(void*)> destroy_functions;
+  };
+
+  static RegistryState* GetState() {
+    static grpc_core::NoDestruct<RegistryState> state;
+    return state.get();
+  }
+};
+
+class SessionContextList {
+ public:
+  ~SessionContextList() {
+    for (uint16_t i = 0; i < num_elements_; ++i) {
+      if (elements_[i] != nullptr) {
+        SessionContextRegistry::DestroyElement(i, elements_[i]);
+      }
+    }
+    delete[] elements_;
+  }
+
+  void Set(uint16_t id, void* ptr) {
+    // Resize the array to fit `id`. Since Set() is called only during the
+    // session handshake and the number of attached contexts is expected to be
+    // extremely small (typically <= 3), a simple, minimal array resizing
+    // allocation is sufficient here.
+    if (id >= num_elements_) {
+      uint16_t new_num = id + 1;
+      void** new_elements = new void*[new_num]();
+      for (uint16_t i = 0; i < num_elements_; ++i) {
+        new_elements[i] = elements_[i];
+      }
+      delete[] elements_;
+      elements_ = new_elements;
+      num_elements_ = new_num;
+    }
+    if (elements_[id] != nullptr) {
+      SessionContextRegistry::DestroyElement(id, elements_[id]);
+    }
+    elements_[id] = ptr;
+  }
+
+  void* Get(uint16_t id) const {
+    if (id < num_elements_ && elements_[id] != nullptr) {
+      return elements_[id];
+    }
+    return nullptr;
+  }
+
+ private:
+  void** elements_ = nullptr;
+  uint16_t num_elements_ = 0;
+};
+
+uint16_t ServerContextRegisterSessionContext(void (*destroy)(void*)) {
+  return SessionContextRegistry::Register(destroy);
+}
+
+void ServerContextSetSessionContext(grpc_call* call, uint16_t id, void* ptr) {
+  if (call == nullptr || id == std::numeric_limits<uint16_t>::max()) {
+    if (ptr != nullptr) {
+      SessionContextRegistry::DestroyElement(id, ptr);
+    }
+    return;
+  }
+  grpc_core::Arena* arena = grpc_call_get_arena(call);
+  auto* list = arena->GetContext<SessionContextList>();
+  if (list == nullptr) {
+    list = arena->New<SessionContextList>();
+    arena->SetContext<SessionContextList>(list);
+  }
+  list->Set(id, ptr);
+}
+
+void* ServerContextGetSessionContext(grpc_call* call, uint16_t id) {
+  if (call == nullptr || id == std::numeric_limits<uint16_t>::max()) {
+    return nullptr;
+  }
+  grpc_core::Arena* arena = grpc_call_get_arena(call);
+
+  auto* list = arena->GetContext<SessionContextList>();
+  if (list != nullptr) {
+    void* ptr = list->Get(id);
+    if (ptr != nullptr) return ptr;
+  }
+
+  auto* parent_call_context = arena->GetContext<grpc_core::ParentCallContext>();
+  if (parent_call_context != nullptr && parent_call_context->arena != nullptr) {
+    auto* parent_list =
+        parent_call_context->arena->GetContext<SessionContextList>();
+    if (parent_list != nullptr) {
+      return parent_list->Get(id);
+    }
+  }
+
+  return nullptr;
+}
+
+}  // namespace internal
+}  // namespace grpc
+
+namespace grpc_core {
+template <>
+struct ArenaContextType<grpc::internal::SessionContextList> {
+  static void Destroy(grpc::internal::SessionContextList* p) {
+    p->~SessionContextList();
+  }
+};
+}  // namespace grpc_core
+
+namespace grpc {
 
 // CompletionOp
 
@@ -112,15 +277,15 @@ class ServerContextBase::CompletionOp final
   // This will be called while interceptors are run if the RPC is a hijacked
   // RPC. This should set hijacking state for each of the ops.
   void SetHijackingState() override {
-    /* Servers don't allow hijacking */
-    GPR_ASSERT(false);
+    // Servers don't allow hijacking
+    grpc_core::Crash("unreachable");
   }
 
-  /* Should be called after interceptors are done running */
+  // Should be called after interceptors are done running
   void ContinueFillOpsAfterInterception() override {}
 
-  /* Should be called after interceptors are done running on the finalize result
-   * path */
+  // Should be called after interceptors are done running on the finalize result
+  // path
   void ContinueFinalizeResultAfterInterception() override {
     done_intercepting_ = true;
     if (!has_tag_) {
@@ -129,14 +294,14 @@ class ServerContextBase::CompletionOp final
       // Unref can delete this, so do not access anything from this afterward.
       return;
     }
-    /* Start a phony op so that we can return the tag */
-    GPR_ASSERT(grpc_call_start_batch(call_.call(), nullptr, 0, core_cq_tag_,
+    // Start a phony op so that we can return the tag
+    GRPC_CHECK(grpc_call_start_batch(call_.call(), nullptr, 0, core_cq_tag_,
                                      nullptr) == GRPC_CALL_OK);
   }
 
  private:
   bool CheckCancelledNoPluck() {
-    grpc_core::MutexLock lock(&mu_);
+    grpc_core::MutexLock lock(mu_);
     return finalized_ ? (cancelled_ != 0) : false;
   }
 
@@ -172,9 +337,9 @@ void ServerContextBase::CompletionOp::FillOps(internal::Call* call) {
   interceptor_methods_.SetCallOpSetInterface(this);
   // The following call_start_batch is internally-generated so no need for an
   // explanatory log on failure.
-  GPR_ASSERT(grpc_call_start_batch(call->call(), &ops, 1, core_cq_tag_,
+  GRPC_CHECK(grpc_call_start_batch(call->call(), &ops, 1, core_cq_tag_,
                                    nullptr) == GRPC_CALL_OK);
-  /* No interceptors to run here */
+  // No interceptors to run here
 }
 
 bool ServerContextBase::CompletionOp::FinalizeResult(void** tag, bool* status) {
@@ -184,7 +349,7 @@ bool ServerContextBase::CompletionOp::FinalizeResult(void** tag, bool* status) {
   bool call_cancel = false;
 
   {
-    grpc_core::MutexLock lock(&mu_);
+    grpc_core::MutexLock lock(mu_);
     if (done_intercepting_) {
       // We are done intercepting.
       has_tag = has_tag_;
@@ -216,7 +381,7 @@ bool ServerContextBase::CompletionOp::FinalizeResult(void** tag, bool* status) {
   if (call_cancel && callback_controller_ != nullptr) {
     callback_controller_->MaybeCallOnCancel();
   }
-  /* Add interception point and run through interceptors */
+  // Add interception point and run through interceptors
   interceptor_methods_.AddInterceptionHookPoint(
       experimental::InterceptionHookPoints::POST_RECV_CLOSE);
   if (interceptor_methods_.RunInterceptors()) {
@@ -236,9 +401,7 @@ bool ServerContextBase::CompletionOp::FinalizeResult(void** tag, bool* status) {
 // ServerContextBase body
 
 ServerContextBase::ServerContextBase()
-    : deadline_(gpr_inf_future(GPR_CLOCK_REALTIME)) {
-  g_gli_initializer.summon();
-}
+    : deadline_(gpr_inf_future(GPR_CLOCK_REALTIME)) {}
 
 ServerContextBase::ServerContextBase(gpr_timespec deadline,
                                      grpc_metadata_array* arr)
@@ -276,7 +439,7 @@ ServerContextBase::CallWrapper::~CallWrapper() {
 void ServerContextBase::BeginCompletionOp(
     internal::Call* call, std::function<void(bool)> callback,
     grpc::internal::ServerCallbackCall* callback_controller) {
-  GPR_ASSERT(!completion_op_);
+  GRPC_CHECK(!completion_op_);
   if (rpc_info_) {
     rpc_info_->Ref();
   }
@@ -292,7 +455,7 @@ void ServerContextBase::BeginCompletionOp(
   } else if (has_notify_when_done_tag_) {
     completion_op_->set_tag(async_notify_when_done_tag_);
   }
-  call->PerformOps(completion_op_);
+  completion_op_->FillOps(call);
 }
 
 internal::CompletionQueueTag* ServerContextBase::GetCompletionOpTag() {
@@ -301,12 +464,12 @@ internal::CompletionQueueTag* ServerContextBase::GetCompletionOpTag() {
 
 void ServerContextBase::AddInitialMetadata(const std::string& key,
                                            const std::string& value) {
-  initial_metadata_.insert(std::make_pair(key, value));
+  initial_metadata_.insert(std::pair(key, value));
 }
 
 void ServerContextBase::AddTrailingMetadata(const std::string& key,
                                             const std::string& value) {
-  trailing_metadata_.insert(std::make_pair(key, value));
+  trailing_metadata_.insert(std::pair(key, value));
 }
 
 void ServerContextBase::TryCancel() const {
@@ -320,7 +483,7 @@ void ServerContextBase::TryCancel() const {
       grpc_call_cancel_with_status(call_.call, GRPC_STATUS_CANCELLED,
                                    "Cancelled on the server side", nullptr);
   if (err != GRPC_CALL_OK) {
-    gpr_log(GPR_ERROR, "TryCancel failed with: %d", err);
+    LOG(ERROR) << "TryCancel failed with: " << err;
   }
 }
 
@@ -345,11 +508,10 @@ void ServerContextBase::set_compression_algorithm(
   compression_algorithm_ = algorithm;
   const char* algorithm_name = nullptr;
   if (!grpc_compression_algorithm_name(algorithm, &algorithm_name)) {
-    gpr_log(GPR_ERROR, "Name for compression algorithm '%d' unknown.",
-            algorithm);
-    abort();
+    grpc_core::Crash(absl::StrFormat(
+        "Name for compression algorithm '%d' unknown.", algorithm));
   }
-  GPR_ASSERT(algorithm_name != nullptr);
+  GRPC_CHECK_NE(algorithm_name, nullptr);
   AddInitialMetadata(GRPC_COMPRESSION_REQUEST_ALGORITHM_MD_KEY, algorithm_name);
 }
 
@@ -363,6 +525,16 @@ std::string ServerContextBase::peer() const {
   return peer;
 }
 
+std::string ServerContextBase::local_address() const {
+  std::string local_address;
+  if (call_.call) {
+    char* c_local_address = grpc_call_get_local_address(call_.call);
+    local_address = c_local_address;
+    gpr_free(c_local_address);
+  }
+  return local_address;
+}
+
 const struct census_context* ServerContextBase::census_context() const {
   return call_.call == nullptr ? nullptr
                                : grpc_census_call_get_context(call_.call);
@@ -374,6 +546,26 @@ void ServerContextBase::SetLoadReportingCosts(
   for (const auto& cost_datum : cost_data) {
     AddTrailingMetadata(GRPC_LB_COST_MD_KEY, cost_datum);
   }
+}
+
+void ServerContextBase::CreateCallMetricRecorder(
+    experimental::ServerMetricRecorder* server_metric_recorder) {
+  if (call_.call == nullptr) return;
+  GRPC_CHECK_EQ(call_metric_recorder_, nullptr);
+  grpc_core::Arena* arena = grpc_call_get_arena(call_.call);
+  // The arena owns the BackendMetricState rather than this ServerContext,
+  // because the backend metric filter may still read it via the arena context
+  // after the ServerContext is destroyed (e.g., in a v3 server stack, trailing
+  // metadata filters run after the send-status op has completed).
+  auto* backend_metric_state =
+      arena->ManagedNew<BackendMetricState>(server_metric_recorder);
+  call_metric_recorder_ = backend_metric_state;
+  arena->SetContext<grpc_core::BackendMetricProvider>(backend_metric_state);
+}
+
+grpc::string_ref ServerContextBase::ExperimentalGetAuthority() const {
+  absl::string_view authority = grpc_call_server_authority(call_.call);
+  return grpc::string_ref(authority.data(), authority.size());
 }
 
 }  // namespace grpc

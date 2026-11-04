@@ -1,8 +1,12 @@
 #!/usr/bin/env powershell
-# Install Python 3.8 for x64 and x86 in order to build wheels on Windows.
+# Install Python 3.9 for x64 and x86 in order to build wheels on Windows.
 
 Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
+# Disable progress bar to avoid getting the
+# '"Access is denied" 0x5 occurred while reading the console output buffer'
+# error when running on kokoro (i.e. in non-interactive mode)
+$global:ProgressPreference = 'SilentlyContinue'
 
 trap {
     $ErrorActionPreference = "Continue"
@@ -18,7 +22,8 @@ function Install-Python {
         [string]$PythonVersion,
         [string]$PythonInstaller,
         [string]$PythonInstallPath,
-        [string]$PythonInstallerHash
+        [string]$PythonInstallerHash,
+        [string]$PythonInstallerHashAlgorithm = "MD5"
     )
     $PythonInstallerUrl = "https://www.python.org/ftp/python/$PythonVersion/$PythonInstaller.exe"
     $PythonInstallerPath = "C:\tools\$PythonInstaller.exe"
@@ -28,7 +33,7 @@ function Install-Python {
     Invoke-WebRequest -Uri $PythonInstallerUrl -OutFile $PythonInstallerPath
 
     # Validates checksum
-    $HashFromDownload = Get-FileHash -Path $PythonInstallerPath -Algorithm MD5
+    $HashFromDownload = Get-FileHash -Path $PythonInstallerPath -Algorithm $PythonInstallerHashAlgorithm
     if ($HashFromDownload.Hash -ne $PythonInstallerHash) {
         throw "Invalid Python installer: failed checksum!"
     }
@@ -61,40 +66,6 @@ function Install-Python {
     Write-Host "Python $PythonVersion installed by $PythonInstaller at $PythonInstallPath."
 }
 
-# Python 3.8
-$Python38x86Config = @{
-    PythonVersion = "3.8.10"
-    PythonInstaller = "python-3.8.10"
-    PythonInstallPath = "C:\Python38_32bit"
-    PythonInstallerHash = "b355cfc84b681ace8908ae50908e8761"
-}
-Install-Python @Python38x86Config
-
-$Python38x64Config = @{
-    PythonVersion = "3.8.10"
-    PythonInstaller = "python-3.8.10-amd64"
-    PythonInstallPath = "C:\Python38"
-    PythonInstallerHash = "62cf1a12a5276b0259e8761d4cf4fe42"
-}
-Install-Python @Python38x64Config
-
-# Python 3.9
-$Python39x86Config = @{
-    PythonVersion = "3.9.11"
-    PythonInstaller = "python-3.9.11"
-    PythonInstallPath = "C:\Python39_32bit"
-    PythonInstallerHash = "4210652b14a030517046cdf111c09c1e"
-}
-Install-Python @Python39x86Config
-
-$Python39x64Config = @{
-    PythonVersion = "3.9.11"
-    PythonInstaller = "python-3.9.11-amd64"
-    PythonInstallPath = "C:\Python39"
-    PythonInstallerHash = "fef52176a572efd48b7148f006b25801"
-}
-Install-Python @Python39x64Config
-
 # Python 3.10
 $Python310x86Config = @{
     PythonVersion = "3.10.3"
@@ -111,3 +82,92 @@ $Python310x64Config = @{
     PythonInstallerHash = "9ea305690dbfd424a632b6a659347c1e"
 }
 Install-Python @Python310x64Config
+
+# Python 3.11
+$Python311x86Config = @{
+    PythonVersion = "3.11.0"
+    PythonInstaller = "python-3.11.0rc1"
+    PythonInstallPath = "C:\Python311_32bit"
+    PythonInstallerHash = "d2e5420e53d9e71c82b4a19763dbaa12"
+}
+Install-Python @Python311x86Config
+
+$Python311x64Config = @{
+    PythonVersion = "3.11.0"
+    PythonInstaller = "python-3.11.0rc1-amd64"
+    PythonInstallPath = "C:\Python311"
+    PythonInstallerHash = "5943d8702e40a5ccd62e5a8d4c8852aa"
+}
+Install-Python @Python311x64Config
+
+# Python 3.12
+$Python312x86Config = @{
+    PythonVersion = "3.12.0"
+    PythonInstaller = "python-3.12.0rc2"
+    PythonInstallPath = "C:\Python312_32bit"
+    PythonInstallerHash = "c7bfbde3b07a7bd013043640ca475b8c"
+}
+Install-Python @Python312x86Config
+
+$Python312x64Config = @{
+    PythonVersion = "3.12.0"
+    PythonInstaller = "python-3.12.0rc2-amd64"
+    PythonInstallPath = "C:\Python312"
+    PythonInstallerHash = "ea1993b5227fa4c8f45a06f5fbdd23b3"
+}
+Install-Python @Python312x64Config
+
+# Python 3.13
+$Python313x86Config = @{
+    PythonVersion = "3.13.0"
+    PythonInstaller = "python-3.13.0rc2"
+    PythonInstallPath = "C:\Python313_32bit"
+    PythonInstallerHash = "647f429b5584d9ee2dd02fdc9c61a38e"
+}
+Install-Python @Python313x86Config
+
+$Python313x64Config = @{
+    PythonVersion = "3.13.0"
+    PythonInstaller = "python-3.13.0rc2-amd64"
+    PythonInstallPath = "C:\Python313"
+    PythonInstallerHash = "0af5ad8734962267323ef45f384de3aa"
+}
+Install-Python @Python313x64Config
+
+# Python 3.14
+$Python314x86Config = @{
+    PythonVersion = "3.14.0"
+    PythonInstaller = "python-3.14.0rc1"
+    PythonInstallPath = "C:\Python314_32bit"
+    PythonInstallerHash = "bad58261535240afd04f6e98510321df"
+}
+Install-Python @Python314x86Config
+
+$Python314x64Config = @{
+    PythonVersion = "3.14.0"
+    PythonInstaller = "python-3.14.0rc1-amd64"
+    PythonInstallPath = "C:\Python314"
+    PythonInstallerHash = "b674030fe04f2d5c4c1385237998a10c"
+}
+Install-Python @Python314x64Config
+
+# Python 3.15
+# python.org only publishes SHA-256 (not MD5) for 3.15.0rc1 installers,
+# so these configs override the default hash algorithm.
+$Python315x86Config = @{
+    PythonVersion = "3.15.0"
+    PythonInstaller = "python-3.15.0rc1"
+    PythonInstallPath = "C:\Python315_32bit"
+    PythonInstallerHash = "faddd74cbcfd5b7d8a66fafb49477ad45841fd61c20ff0664e702b0e0b02fa03"
+    PythonInstallerHashAlgorithm = "SHA256"
+}
+Install-Python @Python315x86Config
+
+$Python315x64Config = @{
+    PythonVersion = "3.15.0"
+    PythonInstaller = "python-3.15.0rc1-amd64"
+    PythonInstallPath = "C:\Python315"
+    PythonInstallerHash = "be7efa348927146eec51e3f8fd8381a92882ff6e4275c7a2fe003624719e6e5e"
+    PythonInstallerHashAlgorithm = "SHA256"
+}
+Install-Python @Python315x64Config
